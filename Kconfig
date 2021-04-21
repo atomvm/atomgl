@@ -1,0 +1,51 @@
+menu "AtomVM ILI934x"
+
+config AVM_ILI934X_MISO_IO_NUM
+    int "SPI MISO IO Num"
+    default 19
+
+config AVM_ILI934X_MOSI_IO_NUM
+    int "SPI MOSI IO Num"
+    default 23
+
+config AVM_ILI934X_SCLK_IO_NUM
+    int "SPI CLK IO Num"
+    default 18
+
+config AVM_ILI934X_SPI_CLOCK_HZ
+    int "SPI Clock Hz"
+    default 27000000
+
+config AVM_ILI934X_DISPLAY_CS_IO_NUM
+    int "Display CS IO Num"
+    default 14
+
+config AVM_ILI934X_BACKLIGHT_IO_NUM
+    int "Backlight IO Num"
+    default 32
+
+config AVM_ILI934X_DC_IO_NUM
+    int "Display DC IO Num"
+    default 27
+
+config AVM_ILI934X_RESET_IO_NUM
+    int "Display Reset IO Num"
+    default 33
+
+config AVM_ILI934X_SD_ENABLE
+    bool "SD Enable"
+    default y
+
+config AVM_ILI934X_SD_CS_IO_NUM
+    int "SD CS IO Num"
+    default 4
+
+config AVM_ILI934X_ENABLE_ILI9342C
+    bool "Enable ILI9342c support"
+    default y
+
+config AVM_ILI934X_ENABLE_TFT_INVON
+    bool "Enable TFT_INVON"
+    default y
+
+endmenu
