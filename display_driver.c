@@ -391,11 +391,13 @@ static void draw_image(struct SPI *spi, int x, int y, int width, int height, con
     free(tmpbuf);
 }
 
-static void draw_text(struct SPI *spi, int x, int y, const char *text, uint8_t r, uint8_t g, uint8_t b)
+static void draw_text(struct SPI *spi, int x, int y, const char *text, uint8_t r, uint8_t g,
+    uint8_t b, uint8_t bgr, uint8_t bgg, uint8_t bgb)
 {
     int len = strlen(text);
 
     uint16_t fg_color = (((uint16_t)(r >> 3)) << 11) | (((uint16_t)(g >> 2)) << 5) | ((uint16_t) b >> 3);
+    uint16_t bg_color = (((uint16_t)(bgr >> 3)) << 11) | (((uint16_t)(bgg >> 2)) << 5) | ((uint16_t) bgb >> 3);
 
     for (int i = 0; i < len; i++) {
         unsigned const char *glyph = fontdata + ((unsigned char) text[i]) * 16;
@@ -404,13 +406,17 @@ static void draw_text(struct SPI *spi, int x, int y, const char *text, uint8_t r
             unsigned char row = glyph[j];
 
             for (int k = 0; k < 8; k++) {
+                uint16_t color;
                 if (row & (1 << (7 - k))) {
-                    set_screen_paint_area(spi, x + i * 8 + k, y + j, 1, 1);
-                    writecommand(spi, TFT_RAMWR);
-                    spi_device_acquire_bus(spi->handle, portMAX_DELAY);
-                    spiwrite(spi, 16, fg_color);
-                    spi_device_release_bus(spi->handle);
+                    color = fg_color;
+                } else {
+                    color = bg_color;
                 }
+                set_screen_paint_area(spi, x + i * 8 + k, y + j, 1, 1);
+                writecommand(spi, TFT_RAMWR);
+                spi_device_acquire_bus(spi->handle, portMAX_DELAY);
+                spiwrite(spi, 16, color);
+                spi_device_release_bus(spi->handle);
             }
         }
     }
@@ -474,7 +480,8 @@ static void execute_command(Context *ctx, term req)
         int ok;
         char *text = interop_term_to_string(text_term, &ok);
 
-        draw_text(spi, x, y, text, (fgcolor >> 16) & 0xFF, (fgcolor >> 8) & 0xFF, fgcolor & 0xFF);
+        draw_text(spi, x, y, text, (fgcolor >> 16) & 0xFF, (fgcolor >> 8) & 0xFF, fgcolor & 0xFF,
+            (bgcolor >> 16) & 0xFF, (bgcolor >> 8) & 0xFF, bgcolor & 0xFF);
 
         free(text);
 
