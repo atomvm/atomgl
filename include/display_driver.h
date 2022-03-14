@@ -24,7 +24,7 @@
 #include <mailbox.h>
 #include <term.h>
 
-void display_driver_init(Context *ctx, term opts);
+Context *display_create_port(GlobalContext *global, term opts);
 void display_enqueue_message(Message *message);
 
 #endif

@@ -586,10 +586,12 @@ static void set_rotation(struct SPI *spi, int rotation)
     }
 }
 
-void display_driver_init(Context *ctx, term opts)
+Context *display_create_port(GlobalContext *global, term opts)
 {
+    Context *ctx = context_new(global);
     ctx->native_handler = display_driver_consume_mailbox;
     display_init(ctx, opts);
+    return ctx;
 }
 
 static void send_message(term pid, term message, GlobalContext *global)
