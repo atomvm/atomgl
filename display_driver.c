@@ -509,7 +509,7 @@ static void process_message(Message *message, Context *ctx)
 {
     term msg = message->message;
 
-    term req = term_get_tuple_element(msg, 3);
+    term req = term_get_tuple_element(msg, 2);
     term cmd = term_get_tuple_element(req, 0);
 
     struct SPI *spi = ctx->platform_data;
