@@ -509,6 +509,7 @@ static void process_message(Message *message, Context *ctx)
 {
     term msg = message->message;
 
+    term from = term_get_tuple_element(msg, 1);
     term req = term_get_tuple_element(msg, 2);
     term cmd = term_get_tuple_element(req, 0);
 
@@ -541,8 +542,8 @@ static void process_message(Message *message, Context *ctx)
         fprintf(stderr, "\n");
     }
 
-    term pid = term_get_tuple_element(msg, 1);
-    term ref = term_get_tuple_element(msg, 2);
+    term pid = term_get_tuple_element(from, 0);
+    term ref = term_get_tuple_element(from, 1);
 
     struct PendingReply pending = {
         .pending_call_pid = pid,
@@ -610,16 +611,19 @@ void display_callback(EventListener *listener)
 
     struct PendingReply pending;
     if (xQueueReceive(spi->replies_queue, &pending, 1)) {
-        int ref_size = (sizeof(uint64_t) / sizeof(term)) + 1;
-        if (UNLIKELY(memory_ensure_free(ctx, 3 + ref_size) != MEMORY_GC_OK)) {
+        int reply_size = TUPLE_SIZE(2) + REF_SIZE + TUPLE_SIZE(3);
+        if (UNLIKELY(memory_ensure_free(ctx, reply_size) != MEMORY_GC_OK)) {
             abort();
         }
-        term return_tuple = term_alloc_tuple(2, ctx);
-
+        term from_tuple = term_alloc_tuple(2, ctx);
+        term_put_tuple_element(from_tuple, 0, pending.pending_call_pid);
         term ref = term_from_ref_ticks(pending.pending_call_ref_ticks, ctx);
+        term_put_tuple_element(from_tuple, 1, ref);
 
-        term_put_tuple_element(return_tuple, 0, ref);
-        term_put_tuple_element(return_tuple, 1, OK_ATOM);
+        term return_tuple = term_alloc_tuple(3, ctx);
+        term_put_tuple_element(return_tuple, 0, context_make_atom(ctx, "\x6" "$reply"));
+        term_put_tuple_element(return_tuple, 1, from_tuple);
+        term_put_tuple_element(return_tuple, 2, OK_ATOM);
 
         send_message(pending.pending_call_pid, return_tuple, ctx->global);
     }
