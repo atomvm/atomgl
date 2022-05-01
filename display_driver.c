@@ -942,7 +942,7 @@ static void display_init(Context *ctx, term opts)
     writecommand(spi, TFT_INVON);
 #endif
 
-    set_rotation(spi, 1);
+    set_rotation(spi, 0);
 
     xTaskCreate(process_messages, "display", 10000, spi, 1, NULL);
 }
