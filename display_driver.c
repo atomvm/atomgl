@@ -65,6 +65,8 @@
 #define SD_ENABLE CONFIG_AVM_ILI934X_SD_ENABLE
 #define SD_CS_IO_NUM CONFIG_AVM_ILI934X_SD_CS_IO_NUM
 
+#define CHAR_WIDTH 8
+
 #define ILI9341_SLPIN 0x10
 #define ILI9341_SLPOUT 0x11
 #define ILI9341_PTLON 0x12
@@ -124,6 +126,91 @@ struct SPI
 
     EventListener listener;
 };
+
+enum primitive
+{
+    Invalid = 0,
+    Image,
+    Rect,
+    Text
+};
+
+struct TextData
+{
+    uint32_t fgcolor;
+    const char *text;
+};
+
+struct ImageData
+{
+    const char *pix;
+};
+
+struct BaseDisplayItem
+{
+    enum primitive primitive;
+    int x;
+    int y;
+    int width;
+    int height;
+    uint32_t brcolor; /* bounding rect color */
+    union
+    {
+        struct ImageData image_data;
+        struct TextData text_data;
+    } data;
+};
+
+typedef struct BaseDisplayItem BaseDisplayItem;
+
+// This struct is just for compatibility reasons with the SDL display driver
+// so it is possible to easily copy & paste code from there.
+struct Screen
+{
+    int w;
+    int h;
+    uint16_t *pixels;
+    uint16_t *pixels_out;
+};
+
+struct Screen *screen;
+
+// This functions is taken from:
+// https://stackoverflow.com/questions/18937701/combining-two-16-bits-rgb-colors-with-alpha-blending
+static inline uint16_t alpha_blend_rgb565(uint32_t fg, uint32_t bg, uint8_t alpha)
+{
+    alpha = (alpha + 4) >> 3;
+    bg = (bg | (bg << 16)) & 0b00000111111000001111100000011111;
+    fg = (fg | (fg << 16)) & 0b00000111111000001111100000011111;
+    uint32_t result = ((((fg - bg) * alpha) >> 5) + bg) & 0b00000111111000001111100000011111;
+    return (uint16_t)((result >> 16) | result);
+}
+
+static inline uint8_t rgba8888_get_alpha(uint32_t color)
+{
+    return color & 0xFF;
+}
+
+static inline uint16_t rgba8888_color_to_rgb565(struct Screen *s, uint32_t color)
+{
+    uint8_t r = color >> 24;
+    uint8_t g = (color >> 16) & 0xFF;
+    uint8_t b = (color >> 8) & 0xFF;
+
+    return (((uint16_t)(r >> 3)) << 11) | (((uint16_t)(g >> 2)) << 5) | ((uint16_t) b >> 3);
+}
+
+static inline uint16_t rgb565_color_to_surface(struct Screen *s, uint16_t color16)
+{
+    return (uint16_t) SPI_SWAP_DATA_TX(color16, 16);
+}
+
+static inline uint16_t uint32_color_to_surface(struct Screen *s, uint32_t color)
+{
+    uint16_t color16 = rgba8888_color_to_rgb565(s, color);
+
+    return rgb565_color_to_surface(s, color16);
+}
 
 struct PendingReply
 {
@@ -214,8 +301,7 @@ static bool spidmawrite(struct SPI *spi_data, int data_len, const void *data)
     spi_data->transaction.addr = 0;
     spi_data->transaction.tx_buffer = data;
 
-    //TODO: int ret = spi_device_queue_trans(spi_data->handle, &spi_data->transaction, portMAX_DELAY);
-    int ret = spi_device_polling_transmit(spi_data->handle, &spi_data->transaction);
+    int ret = spi_device_queue_trans(spi_data->handle, &spi_data->transaction, portMAX_DELAY);
     if (UNLIKELY(ret != ESP_OK)) {
         fprintf(stderr, "spidmawrite: transmit error\n");
         return false;
@@ -251,76 +337,351 @@ static inline void set_screen_paint_area(struct SPI *spi, int x, int y, int widt
     spi_device_release_bus(spi->handle);
 }
 
-static void draw_rect(struct SPI *spi, int x, int y, int width, int height, uint8_t r, uint8_t g, uint8_t b)
+static int draw_image_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *item)
 {
-    set_screen_paint_area(spi, x, y, width, height);
+    int x = item->x;
+    int y = item->y;
 
-    writecommand(spi, TFT_RAMWR);
-
-    int dest_size = width * height;
-    int buf_pixels = (dest_size > 1024) ? 1024 : dest_size;
-
-    uint16_t *tmpbuf = heap_caps_malloc(buf_pixels * sizeof(uint16_t), MALLOC_CAP_DMA);
-
-    uint16_t fg_color = (((uint16_t)(r >> 3)) << 11) | (((uint16_t)(g >> 2)) << 5) | ((uint16_t) b >> 3);
-
-    uint16_t color = SPI_SWAP_DATA_TX(fg_color, 16);
-
-    for (int i = 0; i < buf_pixels; i++) {
-        tmpbuf[i] = color;
+    uint16_t bgcolor;
+    bool visible_bg;
+    if (item->brcolor != 0) {
+        bgcolor = rgba8888_color_to_rgb565(screen, item->brcolor);
+        visible_bg = true;
+    } else {
+        visible_bg = false;
     }
 
+    int width = item->width;
+    const char *data = item->data.image_data.pix;
+
+    int drawn_pixels = 0;
+
+    uint32_t *pixels = ((uint32_t *) data) + (ypos - y) * width + (xpos - x);
+    uint16_t *pixmem16 = (uint16_t *) (((uint8_t *) screen->pixels) + xpos * sizeof(uint16_t));
+
+    if (width > xpos - x + max_line_len) {
+        width = xpos - x + max_line_len;
+    }
+
+    for (int j = xpos - x; j < width; j++) {
+        uint32_t img_pixel = READ_32_UNALIGNED(pixels);
+        uint8_t alpha = rgba8888_get_alpha(img_pixel);
+        if (alpha == 0xFF) {
+            uint16_t color = uint32_color_to_surface(screen, img_pixel);
+            pixmem16[drawn_pixels] = color;
+        } else if (visible_bg) {
+            uint16_t color = rgba8888_color_to_rgb565(screen, img_pixel);
+            uint16_t blended = alpha_blend_rgb565(color, bgcolor, alpha);
+            pixmem16[drawn_pixels] = rgb565_color_to_surface(screen, blended);
+        } else {
+            return drawn_pixels;
+        }
+        drawn_pixels++;
+        pixels++;
+    }
+
+    return drawn_pixels;
+}
+
+static int draw_rect_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *item)
+{
+    int x = item->x;
+    int width = item->width;
+    uint16_t color = uint32_color_to_surface(screen, item->brcolor);
+
+    int drawn_pixels = 0;
+
+    uint16_t *pixmem16 = (uint16_t *) (((uint8_t *) screen->pixels) + xpos * sizeof(uint16_t));
+
+    if (width > xpos - x + max_line_len) {
+        width = xpos - x + max_line_len;
+    }
+
+    for (int j = xpos - x; j < width; j++) {
+        pixmem16[drawn_pixels] = color;
+        drawn_pixels++;
+    }
+
+    return drawn_pixels;
+}
+
+static int draw_text_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *item)
+{
+    int x = item->x;
+    int y = item->y;
+    uint16_t fgcolor = uint32_color_to_surface(screen, item->data.text_data.fgcolor);
+    uint16_t bgcolor;
+    bool visible_bg;
+    if (item->brcolor != 0) {
+        bgcolor = uint32_color_to_surface(screen, item->brcolor);
+        visible_bg = true;
+    } else {
+        visible_bg = false;
+    }
+
+    char *text = (char *) item->data.text_data.text;
+
+    int width = item->width;
+
+    int drawn_pixels = 0;
+
+    uint16_t *pixmem32 = (uint16_t *) (((uint8_t *) screen->pixels) + xpos * sizeof(uint16_t));
+
+    if (width > xpos - x + max_line_len) {
+        width = xpos - x + max_line_len;
+    }
+
+    for (int j = xpos - x; j < width; j++) {
+        int char_index = j / CHAR_WIDTH;
+        char c = text[char_index];
+        unsigned const char *glyph = fontdata + ((unsigned char) c) * 16;
+
+        unsigned char row = glyph[ypos - y];
+
+        bool opaque;
+        int k = j % CHAR_WIDTH;
+        if (row & (1 << (7 - k))) {
+            opaque = true;
+        } else {
+            opaque = false;
+        }
+
+        if (opaque) {
+            pixmem32[drawn_pixels] = fgcolor;
+        } else if (visible_bg) {
+            pixmem32[drawn_pixels] = bgcolor;
+        } else {
+            return drawn_pixels;
+        }
+        drawn_pixels++;
+    }
+
+    return drawn_pixels;
+}
+
+static int find_max_line_len(BaseDisplayItem *items, int count, int xpos, int ypos)
+{
+    int line_len = screen->w;
+
+    for (int i = 0; i < count; i++) {
+        BaseDisplayItem *item = &items[i];
+
+        if ((xpos < item->x) && (ypos >= item->y) && (ypos < item->y + item->height)) {
+            int len_to_item = item->x - xpos;
+            line_len = (line_len > len_to_item) ? len_to_item : line_len;
+        }
+    }
+
+    return line_len;
+}
+
+static int draw_x(int xpos, int ypos, BaseDisplayItem *items, int items_count)
+{
+    bool below = false;
+
+    for (int i = 0; i < items_count; i++) {
+        BaseDisplayItem *item = &items[i];
+        if ((xpos < item->x) || (xpos >= item->x + item->width) || (ypos < item->y) || (ypos >= item->y + item->height)) {
+            continue;
+        }
+
+        int max_line_len = below ? 1 : find_max_line_len(items, i, xpos, ypos);
+
+        int drawn_pixels = 0;
+        switch (items[i].primitive) {
+            case Image:
+                drawn_pixels = draw_image_x(xpos, ypos, max_line_len, item);
+                break;
+
+            case Rect:
+                drawn_pixels = draw_rect_x(xpos, ypos, max_line_len, item);
+                break;
+
+            case Text:
+                drawn_pixels = draw_text_x(xpos, ypos, max_line_len, item);
+                break;
+            default: {
+                fprintf(stderr, "unexpected display list command.\n");
+            }
+        }
+
+        if (drawn_pixels != 0) {
+            return drawn_pixels;
+        }
+
+        below = true;
+    }
+
+    return 1;
+}
+
+static void init_item(BaseDisplayItem *item, term req, Context *ctx)
+{
+    term cmd = term_get_tuple_element(req, 0);
+
+    if (cmd == context_make_atom(ctx, "\x5"
+                                      "image")) {
+        item->primitive = Image;
+        item->x = term_to_int(term_get_tuple_element(req, 1));
+        item->y = term_to_int(term_get_tuple_element(req, 2));
+
+        term bgcolor = term_get_tuple_element(req, 3);
+        if (bgcolor == context_make_atom(ctx, "\xB"
+                                              "transparent")) {
+            item->brcolor = 0;
+        } else {
+            item->brcolor = ((uint32_t) term_to_int(bgcolor)) << 8 | 0xFF;
+        }
+
+        term img = term_get_tuple_element(req, 4);
+
+        term format = term_get_tuple_element(img, 0);
+        if (format != context_make_atom(ctx, "\x8"
+                                             "rgba8888")) {
+            fprintf(stderr, "unsupported image format: ");
+            term_display(stderr, format, ctx);
+            fprintf(stderr, "\n");
+            return;
+        }
+        item->width = term_to_int(term_get_tuple_element(img, 1));
+        item->height = term_to_int(term_get_tuple_element(img, 2));
+        item->data.image_data.pix = term_binary_data(term_get_tuple_element(img, 3));
+
+    } else if (cmd == context_make_atom(ctx, "\x4"
+                                             "rect")) {
+        item->primitive = Rect;
+        item->x = term_to_int(term_get_tuple_element(req, 1));
+        item->y = term_to_int(term_get_tuple_element(req, 2));
+        item->width = term_to_int(term_get_tuple_element(req, 3));
+        item->height = term_to_int(term_get_tuple_element(req, 4));
+        item->brcolor = term_to_int(term_get_tuple_element(req, 5)) << 8 | 0xFF;
+
+    } else if (cmd == context_make_atom(ctx, "\x4"
+                                             "text")) {
+        item->primitive = Text;
+        item->x = term_to_int(term_get_tuple_element(req, 1));
+        item->y = term_to_int(term_get_tuple_element(req, 2));
+
+        item->data.text_data.fgcolor = term_to_int(term_get_tuple_element(req, 4)) << 8 | 0xFF;
+        term bgcolor = term_get_tuple_element(req, 5);
+        if (bgcolor == context_make_atom(ctx, "\xB"
+                                              "transparent")) {
+            item->brcolor = 0;
+        } else {
+            item->brcolor = ((uint32_t) term_to_int(bgcolor)) << 8 | 0xFF;
+        }
+
+        term font = term_get_tuple_element(req, 3);
+        if (font != context_make_atom(ctx, "\xB"
+                                           "default16px")) {
+            fprintf(stderr, "unsupported font: ");
+            term_display(stderr, font, ctx);
+            fprintf(stderr, "\n");
+            return;
+        }
+
+        term text_term = term_get_tuple_element(req, 6);
+        int ok;
+        item->data.text_data.text = interop_term_to_string(text_term, &ok);
+        if (!ok) {
+            fprintf(stderr, "invalid text.\n");
+            return;
+        }
+
+        item->height = 16;
+        item->width = strlen(item->data.text_data.text) * 8;
+
+    } else {
+        fprintf(stderr, "unexpected display list command: ");
+        term_display(stderr, req, ctx);
+        fprintf(stderr, "\n");
+
+        item->primitive = Invalid;
+        item->x = -1;
+        item->y = -1;
+        item->width = 1;
+        item->height = 1;
+    }
+}
+
+static void destroy_items(BaseDisplayItem *items, int items_count)
+{
+    for (int i = 0; i < items_count; i++) {
+        BaseDisplayItem *item = &items[i];
+
+        switch (item->primitive) {
+            case Image:
+                break;
+
+            case Rect:
+                break;
+
+            case Text:
+                free((char *) item->data.text_data.text);
+                break;
+
+            default: {
+                break;
+            }
+        }
+    }
+
+    free(items);
+}
+
+static void do_update(Context *ctx, term display_list)
+{
+    int proper;
+    int len = term_list_length(display_list, &proper);
+
+    BaseDisplayItem *items = malloc(sizeof(BaseDisplayItem) * len);
+
+    term t = display_list;
+    for (int i = len - 1; i >= 0; i--) {
+        init_item(&items[i], term_get_list_head(t), ctx);
+        t = term_get_list_tail(t);
+    }
+
+    int screen_width = screen->w;
+    int screen_height = screen->h;
+    struct SPI *spi = ctx->platform_data;
+
+    set_screen_paint_area(spi, 0, 0, screen_width, screen_height);
+    writecommand(spi, TFT_RAMWR);
     spi_device_acquire_bus(spi->handle, portMAX_DELAY);
 
-    int chunks = dest_size / 1024;
-    for (int i = 0; i < chunks; i++) {
-        spidmawrite(spi, 1024 * sizeof(uint16_t), tmpbuf);
+    bool transaction_in_progress = false;
+
+    for (int ypos = 0; ypos < screen_height; ypos++) {
+        int xpos = 0;
+        while (xpos < screen_width) {
+            int drawn_pixels = draw_x(xpos, ypos, items, len);
+            xpos += drawn_pixels;
+        }
+
+        if (transaction_in_progress) {
+            spi_transaction_t *trans;
+            // I did a quick measurement, and most of the time is spent waiting for DMA transaction
+            // eg. 23 us spent in draw_x, 188 us spent in spi_device_get_trans_result
+            spi_device_get_trans_result(spi->handle, &trans, portMAX_DELAY);
+        }
+
+        //NEW CODE
+        void *tmp = screen->pixels;
+        screen->pixels = screen->pixels_out;
+        screen->pixels_out = tmp;
+        spidmawrite(spi, screen_width * sizeof(uint16_t), screen->pixels_out);
+        transaction_in_progress = true;
     }
-    int last_chunk_size = dest_size - chunks * 1024;
-    if (last_chunk_size) {
-        spidmawrite(spi, last_chunk_size * sizeof(uint16_t), tmpbuf);
+
+    if (transaction_in_progress) {
+        spi_transaction_t *trans;
+        spi_device_get_trans_result(spi->handle, &trans, portMAX_DELAY);
     }
 
     spi_device_release_bus(spi->handle);
-    free(tmpbuf);
-}
 
-static inline void clear_screen(struct SPI *spi, uint8_t r, uint8_t g, uint8_t b)
-{
-    draw_rect(spi, 0, 0, 320, 240, r, g, b);
-}
-
-// This functions is taken from:
-// https://stackoverflow.com/questions/18937701/combining-two-16-bits-rgb-colors-with-alpha-blending
-static inline uint16_t alpha_blend_rgb565(uint32_t fg, uint32_t bg, uint8_t alpha)
-{
-    alpha = (alpha + 4) >> 3;
-    bg = (bg | (bg << 16)) & 0b00000111111000001111100000011111;
-    fg = (fg | (fg << 16)) & 0b00000111111000001111100000011111;
-    uint32_t result = ((((fg - bg) * alpha) >> 5) + bg) & 0b00000111111000001111100000011111;
-    return (uint16_t)((result >> 16) | result);
-}
-
-static inline void rgba_to_rgb565(const uint8_t *data, int buf_pixel_size, uint16_t bg_color, uint16_t *outbuf)
-{
-    uint16_t swapped_bg_color = SPI_SWAP_DATA_TX(bg_color, 16);
-
-    for (int i = 0; i < buf_pixel_size; i++) {
-        if (data[3] == 255) {
-            uint16_t color = (((uint16_t)(data[0] >> 3)) << 11) | (((uint16_t)(data[1] >> 2)) << 5) | ((uint16_t) data[2] >> 3);
-            outbuf[i] = SPI_SWAP_DATA_TX(color, 16);
-
-        } else if (data[3] == 0) {
-            outbuf[i] = swapped_bg_color;
-
-        } else {
-            uint16_t fg_color = (((uint16_t)(data[0] >> 3)) << 11) | (((uint16_t)(data[1] >> 2)) << 5) | ((uint16_t) data[2] >> 3);
-
-            uint16_t color = alpha_blend_rgb565(fg_color, bg_color, data[3]);
-            outbuf[i] = SPI_SWAP_DATA_TX(color, 16);
-        }
-        data += 4;
-    }
+    destroy_items(items, len);
 }
 
 void draw_buffer(struct SPI *spi, int x, int y, int width, int height, const void *imgdata)
@@ -359,152 +720,6 @@ void draw_buffer(struct SPI *spi, int x, int y, int width, int height, const voi
     free(tmpbuf);
 }
 
-static void draw_image(struct SPI *spi, int x, int y, int width, int height, const void *imgdata, uint8_t r, uint8_t g, uint8_t b)
-{
-    const uint8_t *data = imgdata;
-
-    set_screen_paint_area(spi, x, y, width, height);
-
-    writecommand(spi, TFT_RAMWR);
-
-    int dest_size = width * height;
-    int buf_pixel_size = (dest_size > 1024) ? 1024 : dest_size;
-
-    uint16_t *tmpbuf = heap_caps_malloc(buf_pixel_size * sizeof(uint16_t), MALLOC_CAP_DMA);
-
-    uint16_t bg_color = (((uint16_t)(r >> 3)) << 11) | (((uint16_t)(g >> 2)) << 5) | ((uint16_t) b >> 3);
-
-    int chunks = dest_size / 1024;
-
-    spi_device_acquire_bus(spi->handle, portMAX_DELAY);
-    for (int i = 0; i < chunks; i++) {
-        rgba_to_rgb565(data + i * 1024 * sizeof(uint32_t), buf_pixel_size, bg_color, tmpbuf);
-        spidmawrite(spi, buf_pixel_size * sizeof(uint16_t), tmpbuf);
-    }
-    int last_chunk_size = dest_size - chunks * 1024;
-    if (last_chunk_size) {
-        rgba_to_rgb565(data + chunks * 1024 * sizeof(uint32_t), last_chunk_size, bg_color, tmpbuf);
-        spidmawrite(spi, last_chunk_size * sizeof(uint16_t), tmpbuf);
-    }
-    spi_device_release_bus(spi->handle);
-
-    free(tmpbuf);
-}
-
-static void draw_text(struct SPI *spi, int x, int y, const char *text, uint8_t r, uint8_t g,
-    uint8_t b, uint8_t bgr, uint8_t bgg, uint8_t bgb)
-{
-    int len = strlen(text);
-
-    uint16_t fg_color = (((uint16_t)(r >> 3)) << 11) | (((uint16_t)(g >> 2)) << 5) | ((uint16_t) b >> 3);
-    uint16_t bg_color = (((uint16_t)(bgr >> 3)) << 11) | (((uint16_t)(bgg >> 2)) << 5) | ((uint16_t) bgb >> 3);
-
-    for (int i = 0; i < len; i++) {
-        unsigned const char *glyph = fontdata + ((unsigned char) text[i]) * 16;
-
-        for (int j = 0; j < 16; j++) {
-            unsigned char row = glyph[j];
-
-            for (int k = 0; k < 8; k++) {
-                uint16_t color;
-                if (row & (1 << (7 - k))) {
-                    color = fg_color;
-                } else {
-                    color = bg_color;
-                }
-                set_screen_paint_area(spi, x + i * 8 + k, y + j, 1, 1);
-                writecommand(spi, TFT_RAMWR);
-                spi_device_acquire_bus(spi->handle, portMAX_DELAY);
-                spiwrite(spi, 16, color);
-                spi_device_release_bus(spi->handle);
-            }
-        }
-    }
-}
-
-static void execute_command(Context *ctx, term req)
-{
-    term cmd = term_get_tuple_element(req, 0);
-
-    struct SPI *spi = ctx->platform_data;
-
-    if (cmd == context_make_atom(ctx, "\x5"
-                                      "image")) {
-        int x = term_to_int(term_get_tuple_element(req, 1));
-        int y = term_to_int(term_get_tuple_element(req, 2));
-        uint32_t bgcolor = term_to_int(term_get_tuple_element(req, 3));
-        term img = term_get_tuple_element(req, 4);
-
-        term format = term_get_tuple_element(img, 0);
-        if (format != context_make_atom(ctx, "\x8"
-                                             "rgba8888")) {
-            fprintf(stderr, "unsupported image format: ");
-            term_display(stderr, format, ctx);
-            fprintf(stderr, "\n");
-            return;
-        }
-        int width = term_to_int(term_get_tuple_element(img, 1));
-        int height = term_to_int(term_get_tuple_element(img, 2));
-        const char *data = term_binary_data(term_get_tuple_element(img, 3));
-
-        draw_image(spi, x, y, width, height, data, (bgcolor >> 16) & 0xFF, (bgcolor >> 8) & 0xFF, bgcolor & 0xFF);
-
-    } else if (cmd == context_make_atom(ctx, "\x4"
-                                             "rect")) {
-        int x = term_to_int(term_get_tuple_element(req, 1));
-        int y = term_to_int(term_get_tuple_element(req, 2));
-        int width = term_to_int(term_get_tuple_element(req, 3));
-        int height = term_to_int(term_get_tuple_element(req, 4));
-        int color = term_to_int(term_get_tuple_element(req, 5));
-
-        draw_rect(spi, x, y, width, height,
-            (color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF);
-
-    } else if (cmd == context_make_atom(ctx, "\x4"
-                                             "text")) {
-        int x = term_to_int(term_get_tuple_element(req, 1));
-        int y = term_to_int(term_get_tuple_element(req, 2));
-        term font = term_get_tuple_element(req, 3);
-        uint32_t fgcolor = term_to_int(term_get_tuple_element(req, 4));
-        uint32_t bgcolor = term_to_int(term_get_tuple_element(req, 5));
-        term text_term = term_get_tuple_element(req, 6);
-
-        if (font != context_make_atom(ctx, "\xB"
-                                           "default16px")) {
-            fprintf(stderr, "unsupported font: ");
-            term_display(stderr, font, ctx);
-            fprintf(stderr, "\n");
-            return;
-        }
-
-        int ok;
-        char *text = interop_term_to_string(text_term, &ok);
-
-        draw_text(spi, x, y, text, (fgcolor >> 16) & 0xFF, (fgcolor >> 8) & 0xFF, fgcolor & 0xFF,
-            (bgcolor >> 16) & 0xFF, (bgcolor >> 8) & 0xFF, bgcolor & 0xFF);
-
-        free(text);
-
-    } else {
-        fprintf(stderr, "unexpected display list command: ");
-        term_display(stderr, req, ctx);
-        fprintf(stderr, "\n");
-    }
-}
-
-static void execute_commands(Context *ctx, term display_list)
-{
-    struct SPI *spi = ctx->platform_data;
-    clear_screen(spi, 0xFF, 0xFF, 0xFF);
-
-    term t = display_list;
-
-    while (term_is_nonempty_list(t)) {
-        execute_command(ctx, term_get_list_head(t));
-        t = term_get_list_tail(t);
-    }
-}
-
 static void process_message(Message *message, Context *ctx)
 {
     term msg = message->message;
@@ -518,7 +733,7 @@ static void process_message(Message *message, Context *ctx)
     if (cmd == context_make_atom(ctx, "\x6"
                                       "update")) {
         term display_list = term_get_tuple_element(req, 1);
-        execute_commands(ctx, display_list);
+        do_update(ctx, display_list);
 
     } else if (cmd == context_make_atom(ctx, "\xB"
                                              "draw_buffer")) {
@@ -621,7 +836,8 @@ void display_callback(EventListener *listener)
         term_put_tuple_element(from_tuple, 1, ref);
 
         term return_tuple = term_alloc_tuple(3, ctx);
-        term_put_tuple_element(return_tuple, 0, context_make_atom(ctx, "\x6" "$reply"));
+        term_put_tuple_element(return_tuple, 0, context_make_atom(ctx, "\x6"
+                                                                       "$reply"));
         term_put_tuple_element(return_tuple, 1, from_tuple);
         term_put_tuple_element(return_tuple, 2, OK_ATOM);
 
@@ -631,6 +847,13 @@ void display_callback(EventListener *listener)
 
 static void display_init(Context *ctx, term opts)
 {
+    screen = malloc(sizeof(struct Screen));
+    // FIXME: hardcoded width and height
+    screen->w = 320;
+    screen->h = 240;
+    screen->pixels = heap_caps_malloc(screen->w * sizeof(uint16_t), MALLOC_CAP_DMA);
+    screen->pixels_out = heap_caps_malloc(screen->w * sizeof(uint16_t), MALLOC_CAP_DMA);
+
 #if SD_ENABLE == true
     if (!sdcard_init()) {
 #else
