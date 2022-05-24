@@ -637,7 +637,7 @@ static void do_update(Context *ctx, term display_list)
     BaseDisplayItem *items = malloc(sizeof(BaseDisplayItem) * len);
 
     term t = display_list;
-    for (int i = len - 1; i >= 0; i--) {
+    for (int i = 0; i < len; i++) {
         init_item(&items[i], term_get_list_head(t), ctx);
         t = term_get_list_tail(t);
     }
