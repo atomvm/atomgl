@@ -90,6 +90,7 @@ struct Screen
     int w;
     int h;
     uint8_t *pixels;
+    uint8_t *dma_out;
     // keep double buffer disabled for now: uint16_t *pixels_out;
 };
 
@@ -407,7 +408,7 @@ static void do_update(Context *ctx, term display_list)
     bool transaction_in_progress = false;
 
     for (int ypos = 0; ypos < screen_height; ypos++) {
-        if (transaction_in_progress) {
+        if (!screen->dma_out && transaction_in_progress) {
             spi_transaction_t *trans = NULL;
             spi_device_get_trans_result(spi->handle, &trans, portMAX_DELAY);
         }
@@ -425,13 +426,21 @@ static void do_update(Context *ctx, term display_list)
         buf[2 + DISPLAY_WIDTH / 8] = 0;
         buf[2 + DISPLAY_WIDTH / 8 + 1] = 0;
 
-        /* Disable double buffer for now:
-        void *tmp = screen->pixels;
-        screen->pixels = screen->pixels_out;
-        screen->pixels_out = tmp;
-        */
+        if (screen->dma_out) {
+            if (transaction_in_progress) {
+                spi_transaction_t *trans = NULL;
+                spi_device_get_trans_result(spi->handle, &trans, portMAX_DELAY);
+            }
+            void *tmp = screen->pixels;
+            screen->pixels = screen->dma_out;
+            buf = screen->pixels;
+            screen->dma_out = tmp;
 
-        spidmawrite(spi, memsize, buf);
+            spidmawrite(spi, memsize, screen->dma_out);
+        } else {
+            spidmawrite(spi, memsize, buf);
+        }
+
         transaction_in_progress = true;
     }
 
@@ -559,13 +568,18 @@ static void display_init(Context *ctx, int cs_gpio)
     screen->w = 400;
     screen->h = 240;
     int memsize = 2 + 400 / 8 + 2;
-    uint8_t *buf = heap_caps_malloc(memsize, MALLOC_CAP_DMA);
-    if (UNLIKELY(!buf)) {
+
+    screen->pixels = heap_caps_malloc(memsize, MALLOC_CAP_DMA);
+    if (UNLIKELY(!screen->pixels)) {
         fprintf(stderr, "failed to allocate buf!\n");
         abort();
     }
-    screen->pixels = buf;
-    //disable double buffer for now: screen->pixels_out = heap_caps_malloc(screen->w * sizeof(uint16_t), MALLOC_CAP_DMA);
+
+    screen->dma_out = heap_caps_malloc(memsize, MALLOC_CAP_DMA);
+    if (UNLIKELY(!screen->dma_out)) {
+        fprintf(stderr, "failed to allocate buf!\n");
+        abort();
+    }
 
 #if SD_ENABLE == true
     if (!sdcard_init()) {
