@@ -104,7 +104,7 @@ struct PendingReply
 static xQueueHandle display_messages_queue;
 
 static void display_driver_consume_mailbox(Context *ctx);
-static void display_init(Context *ctx, term opts);
+static void display_init(Context *ctx, int cs_gpio);
 
 int vcom = 0x0;
 static inline int get_vcom()
@@ -501,9 +501,19 @@ static void display_driver_consume_mailbox(Context *ctx)
 
 Context *memory_lcd_display_create_port(GlobalContext *global, term opts)
 {
+    int spi_cs_gpio_atom_index = globalcontext_insert_atom(global, ATOM_STR("\xB", "spi_cs_gpio"));
+    term spi_cs_gpio_atom = term_from_atom_index(spi_cs_gpio_atom_index);
+
+    term cs_gpio_term = interop_proplist_get_value(opts, spi_cs_gpio_atom);
+    if (cs_gpio_term == term_nil()) {
+        return NULL;
+    }
+
+    int cs_gpio = term_to_int(cs_gpio_term);
+
     Context *ctx = context_new(global);
     ctx->native_handler = display_driver_consume_mailbox;
-    display_init(ctx, opts);
+    display_init(ctx, cs_gpio);
     return ctx;
 }
 
@@ -542,7 +552,7 @@ static void display_callback(EventListener *listener)
     }
 }
 
-static void display_init(Context *ctx, term opts)
+static void display_init(Context *ctx, int cs_gpio)
 {
     screen = malloc(sizeof(struct Screen));
     // FIXME: hardcoded width and height
@@ -598,7 +608,7 @@ static void display_init(Context *ctx, term opts)
     memset(&devcfg, 0, sizeof(spi_device_interface_config_t));
     devcfg.clock_speed_hz = 1 * 1000 * 1000; //SPI_CLOCK_HZ;
     devcfg.mode = 1;
-    devcfg.spics_io_num = DISPLAY_CS_IO_NUM;
+    devcfg.spics_io_num = cs_gpio;
     devcfg.queue_size = 32;
     devcfg.address_bits = ADDRESS_LEN_BITS;
     devcfg.flags = SPI_DEVICE_BIT_LSBFIRST | SPI_DEVICE_POSITIVE_CS;
