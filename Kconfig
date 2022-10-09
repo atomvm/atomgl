@@ -1,3 +1,7 @@
+# Copyright 2020-2022 Davide Bettio <davide@uninstall.it>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 menu "AtomVM ILI934x"
 
 config AVM_ILI934X_MISO_IO_NUM
