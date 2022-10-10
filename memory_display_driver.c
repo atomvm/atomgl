@@ -120,9 +120,10 @@ static inline int get_vcom()
     return current_vcom;
 }
 
-static inline void dither(int x, int y, uint8_t r, uint8_t g, uint8_t b, int *out_r, int *out_g, int *out_b)
+static int get_color(int x, int y, uint8_t r, uint8_t g, uint8_t b)
 {
-    uint8_t m[4][4] = {
+    // dither
+    const uint8_t m[4][4] = {
         { 0, 8, 2, 10 },
         { 12, 4, 14, 6 },
         { 3, 11, 1, 9 },
@@ -130,15 +131,14 @@ static inline void dither(int x, int y, uint8_t r, uint8_t g, uint8_t b, int *ou
     };
 
     // r = 255 / values / 4
-    *out_r = r + roundf(63.75 * ((float) m[x % 4][y % 4] * 0.0625 - 0.5));
-    *out_g = g + roundf(63.75 * ((float) m[x % 4][y % 4] * 0.0625 - 0.5));
-    *out_b = b + roundf(63.75 * ((float) m[x % 4][y % 4] * 0.0625 - 0.5));
-}
+    float out_r = r + roundf(63.75 * ((float) m[x % 4][y % 4] * 0.0625 - 0.5));
+    float out_g = g + roundf(63.75 * ((float) m[x % 4][y % 4] * 0.0625 - 0.5));
+    float out_b = b + roundf(63.75 * ((float) m[x % 4][y % 4] * 0.0625 - 0.5));
+    // end of dither
 
-static int closest(int r1, int g1, int b1)
-{
-    float y = 0.2126 * r1 + 0.7152 * g1 + 0.0722 * b1;
-    return y >= 128;
+    // get closest
+    float yval = 0.2126 * out_r + 0.7152 * out_g + 0.0722 * out_b;
+    return yval >= 128;
 }
 
 #if SD_ENABLE == true
@@ -250,21 +250,12 @@ static int draw_image_x(uint8_t *line_buf, int xpos, int ypos, int max_line_len,
             uint8_t r = img_pixel >> 24;
             uint8_t g = (img_pixel >> 16) & 0xFF;
             uint8_t b = (img_pixel >> 8) & 0xFF;
-            int rd;
-            int gd;
-            int bd;
-            dither(xpos + drawn_pixels, ypos, r, g, b, &rd, &gd, &bd);
-            uint8_t c = closest(rd, gd, bd);
 
+            uint8_t c = get_color(xpos + drawn_pixels, ypos, r, g, b);
             draw_pixel_x(line_buf, xpos + drawn_pixels, c);
 
         } else if (visible_bg) {
-            int rd;
-            int gd;
-            int bd;
-            dither(xpos + drawn_pixels, ypos, bgcolor_r, bgcolor_g, bgcolor_b, &rd, &gd, &bd);
-            uint8_t c = closest(rd, gd, bd);
-
+            uint8_t c = get_color(xpos + drawn_pixels, ypos, bgcolor_r, bgcolor_g, bgcolor_b);
             draw_pixel_x(line_buf, xpos + drawn_pixels, c);
 
         } else {
@@ -293,13 +284,9 @@ static int draw_rect_x(uint8_t *line_buf, int xpos, int ypos, int max_line_len, 
     }
 
     for (int j = xpos - x; j < width; j++) {
-        int rd;
-        int gd;
-        int bd;
-        dither(xpos + drawn_pixels, ypos, r, g, b, &rd, &gd, &bd);
-        uint8_t c = closest(rd, gd, bd);
-
+        uint8_t c = get_color(xpos + drawn_pixels, ypos, r, g, b);
         draw_pixel_x(line_buf, xpos + drawn_pixels, c);
+
         drawn_pixels++;
     }
 
@@ -358,21 +345,11 @@ static int draw_text_x(uint8_t *line_buf, int xpos, int ypos, int max_line_len, 
         }
 
         if (opaque) {
-            int rd;
-            int gd;
-            int bd;
-            dither(xpos + drawn_pixels, ypos, fgcolor_r, fgcolor_g, fgcolor_b, &rd, &gd, &bd);
-            uint8_t c = closest(rd, gd, bd);
-
+            uint8_t c = get_color(xpos + drawn_pixels, ypos, fgcolor_r, fgcolor_g, fgcolor_b);
             draw_pixel_x(line_buf, xpos + drawn_pixels, c);
 
         } else if (visible_bg) {
-            int rd;
-            int gd;
-            int bd;
-            dither(xpos + drawn_pixels, ypos, bgcolor_r, bgcolor_g, bgcolor_b, &rd, &gd, &bd);
-            uint8_t c = closest(rd, gd, bd);
-
+            uint8_t c = get_color(xpos + drawn_pixels, ypos, bgcolor_r, bgcolor_g, bgcolor_b);
             draw_pixel_x(line_buf, xpos + drawn_pixels, c);
 
         } else {
