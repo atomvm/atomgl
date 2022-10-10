@@ -209,7 +209,7 @@ static inline void draw_pixel_x(uint8_t *line_buf, int xpos, int color)
 #endif
 
     int bpos = (xpos % 8);
-    line_buf[xpos / 8] = (line_buf[xpos / 8] & ~(0x1 << bpos)) | ((color & 0x1) << bpos);
+    line_buf[xpos / 8] = (line_buf[xpos / 8] & ~(0x1 << bpos)) | (color << bpos);
 }
 
 static int draw_image_x(uint8_t *line_buf, int xpos, int ypos, int max_line_len, BaseDisplayItem *item)
