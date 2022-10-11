@@ -25,6 +25,7 @@
 
 #include <esp32_sys.h>
 
+Context *acep_5in65_7c_display_driver_create_port(GlobalContext *global, term opts);
 Context *ili934x_display_create_port(GlobalContext *global, term opts);
 Context *memory_lcd_display_create_port(GlobalContext *global, term opts);
 
@@ -46,7 +47,9 @@ Context *display_create_port(GlobalContext *global, term opts)
     }
 
     Context *ctx = NULL;
-    if (!strcmp(compat_string, "sharp_memory_lcd")) {
+    if (!strcmp(compat_string, "acep_5in65_7c")) {
+        ctx = acep_5in65_7c_display_driver_create_port(global, opts);
+    } else if (!strcmp(compat_string, "sharp_memory_lcd")) {
         ctx = memory_lcd_display_create_port(global, opts);
     } else if (!strcmp(compat_string, "ili934x")) {
         ctx = ili934x_display_create_port(global, opts);
