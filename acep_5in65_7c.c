@@ -24,6 +24,7 @@
 #include <freertos/task.h>
 
 #include <math.h>
+#include <stdbool.h>
 #include <string.h>
 
 #include <defaultatoms.h>
@@ -42,6 +43,7 @@
 
 #include "display_items.h"
 #include "font.c"
+#include "spi_display.h"
 
 #define CHAR_WIDTH 8
 
@@ -51,8 +53,7 @@
 
 struct SPI
 {
-    spi_device_handle_t handle;
-    spi_transaction_t transaction;
+    struct SPIDisplay spi_disp;
     Context *ctx;
     xQueueHandle replies_queue;
 
@@ -66,8 +67,6 @@ struct PendingReply
 };
 
 static xQueueHandle display_messages_queue;
-
-static spi_device_handle_t handle;
 
 static inline float square(float p)
 {
@@ -127,63 +126,16 @@ static int closest(int r1, int g1, int b1)
     return min_index;
 }
 
-static bool spiwrite(int data_len, uint32_t data)
-{
-    spi_transaction_t transaction;
-
-    memset(&transaction, 0, sizeof(spi_transaction_t));
-
-    uint32_t tx_data = SPI_SWAP_DATA_TX(data, data_len);
-
-    transaction.flags = SPI_TRANS_USE_TXDATA | SPI_TRANS_USE_RXDATA;
-    transaction.length = data_len;
-    transaction.addr = 0;
-    transaction.tx_data[0] = tx_data;
-    transaction.tx_data[1] = (tx_data >> 8) & 0xFF;
-    transaction.tx_data[2] = (tx_data >> 16) & 0xFF;
-    transaction.tx_data[3] = (tx_data >> 24) & 0xFF;
-
-    // TODO: int ret = spi_device_queue_trans(spi_data->handle, &spi_data->transaction, portMAX_DELAY);
-    int ret = spi_device_polling_transmit(handle, &transaction);
-    if (UNLIKELY(ret != ESP_OK)) {
-        fprintf(stderr, "spiwrite: transmit error\n");
-        return false;
-    }
-
-    return true;
-}
-
-static bool spidmawrite(int data_len, const void *data)
-{
-    spi_transaction_t transaction;
-
-    memset(&transaction, 0, sizeof(spi_transaction_t));
-
-    transaction.flags = 0;
-    transaction.length = data_len * 8;
-    transaction.addr = 0;
-    transaction.tx_buffer = data;
-
-    // TODO: int ret = spi_device_queue_trans(spi_data->handle, &spi_data->transaction, portMAX_DELAY);
-    int ret = spi_device_polling_transmit(handle, &transaction);
-    if (UNLIKELY(ret != ESP_OK)) {
-        fprintf(stderr, "spidmawrite: transmit error\n");
-        return false;
-    }
-
-    return true;
-}
-
-static void writecommand(uint8_t cmd)
+static void writecommand(struct SPIDisplay *spi_disp, uint8_t cmd)
 {
     gpio_set_level(DISPLAY_DC, 0);
-    spiwrite(8, cmd);
+    spi_display_write(spi_disp, 8, cmd);
 }
 
-static void writedata(uint8_t data)
+static void writedata(struct SPIDisplay *spi_disp, uint8_t data)
 {
     gpio_set_level(DISPLAY_DC, 1);
-    spiwrite(8, data);
+    spi_display_write(spi_disp, 8, data);
 }
 
 static void display_reset()
@@ -403,36 +355,51 @@ static void do_update(Context *ctx, term display_list)
 
     int screen_width = DISPLAY_WIDTH;
     int screen_height = DISPLAY_HEIGHT;
+    struct SPI *spi = ctx->platform_data;
 
-    spi_device_acquire_bus(handle, portMAX_DELAY);
-    writecommand(0x61);
-    writedata(0x02);
-    writedata(0x58);
-    writedata(0x01);
-    writedata(0xC0);
-    writecommand(0x10);
+    struct SPIDisplay *spi_disp = &spi->spi_disp;
+    spi_device_acquire_bus(spi_disp->handle, portMAX_DELAY);
+    writecommand(spi_disp, 0x61);
+    writedata(spi_disp, 0x02);
+    writedata(spi_disp, 0x58);
+    writedata(spi_disp, 0x01);
+    writedata(spi_disp, 0xC0);
+    writecommand(spi_disp, 0x10);
 
     gpio_set_level(DISPLAY_DC, 1);
 
     uint8_t *buf = heap_caps_malloc(DISPLAY_WIDTH / 2, MALLOC_CAP_DMA);
     memset(buf, 0, DISPLAY_WIDTH / 2);
 
+    bool transaction_in_progress = false;
+
     for (int ypos = 0; ypos < screen_height; ypos++) {
+        if (transaction_in_progress) {
+            spi_transaction_t *trans = NULL;
+            spi_device_get_trans_result(spi->spi_disp.handle, &trans, portMAX_DELAY);
+        }
+
         int xpos = 0;
         while (xpos < screen_width) {
             int drawn_pixels = draw_x(buf, xpos, ypos, items, len);
             xpos += drawn_pixels;
         }
 
-        spidmawrite(DISPLAY_WIDTH / 2, buf);
+        spi_display_dmawrite(&spi->spi_disp, DISPLAY_WIDTH / 2, buf);
+        transaction_in_progress = true;
     }
 
-    writecommand(0x04);
+    if (transaction_in_progress) {
+        spi_transaction_t *trans = NULL;
+        spi_device_get_trans_result(spi->spi_disp.handle, &trans, portMAX_DELAY);
+    }
+
+    writecommand(spi_disp, 0x04);
     wait_busy_level(1);
-    writecommand(0x12);
+    writecommand(spi_disp, 0x12);
     wait_busy_level(1);
-    writecommand(0x02);
-    spi_device_release_bus(handle);
+    writecommand(spi_disp, 0x02);
+    spi_device_release_bus(spi_disp->handle);
     wait_busy_level(0);
 
     destroy_items(items, len);
@@ -522,30 +489,47 @@ static void display_callback(EventListener *listener)
 }
 
 #if SELF_TEST
-static void clear_screen(int color)
+static void clear_screen(Context *ctx, int color)
 {
+    struct SPI *spi = ctx->platform_data;
+
     uint8_t *buf = heap_caps_malloc(DISPLAY_WIDTH / 2, MALLOC_CAP_DMA);
 
-    spi_device_acquire_bus(handle, portMAX_DELAY);
-    writecommand(0x61);
-    writedata(0x02);
-    writedata(0x58);
-    writedata(0x01);
-    writedata(0xC0);
-    writecommand(0x10);
+    struct SPIDisplay *spi_disp = &spi->spi_disp;
+    spi_device_acquire_bus(spi_disp->handle, portMAX_DELAY);
+    writecommand(spi_disp, 0x61);
+    writedata(spi_disp, 0x02);
+    writedata(spi_disp, 0x58);
+    writedata(spi_disp, 0x01);
+    writedata(spi_disp, 0xC0);
+    writecommand(spi_disp, 0x10);
 
     gpio_set_level(DISPLAY_DC, 1);
 
+    bool transaction_in_progress = false;
+
     for (int i = 0; i < DISPLAY_HEIGHT; i++) {
+        if (transaction_in_progress) {
+            spi_transaction_t *trans = NULL;
+            spi_device_get_trans_result(spi->spi_disp.handle, &trans, portMAX_DELAY);
+        }
+
         memset(buf, color | (color << 4), DISPLAY_WIDTH / 2);
-        spidmawrite(DISPLAY_WIDTH / 2, buf);
+        spi_display_dmawrite(spi_disp, DISPLAY_WIDTH / 2, buf);
+        transaction_in_progress = true;
     }
-    writecommand(0x04);
+
+    if (transaction_in_progress) {
+        spi_transaction_t *trans = NULL;
+        spi_device_get_trans_result(spi->spi_disp.handle, &trans, portMAX_DELAY);
+    }
+
+    writecommand(spi_disp, 0x04);
     wait_busy_level(1);
-    writecommand(0x12);
+    writecommand(spi_disp, 0x12);
     wait_busy_level(1);
-    writecommand(0x02);
-    spi_device_release_bus(handle);
+    writecommand(spi_disp, 0x02);
+    spi_device_release_bus(spi_disp->handle);
     wait_busy_level(0);
 }
 #endif
@@ -570,7 +554,10 @@ static void display_spi_init(Context *ctx)
     ret = spi_bus_initialize(HSPI_HOST, &buscfg, 1);
     ESP_ERROR_CHECK(ret);
 
-    ret = spi_bus_add_device(HSPI_HOST, &devcfg, &handle);
+    struct SPI *spi = malloc(sizeof(struct SPI));
+    // TODO check here
+
+    ret = spi_bus_add_device(HSPI_HOST, &devcfg, &spi->spi_disp.handle);
     ESP_ERROR_CHECK(ret);
 
     gpio_set_direction(19, GPIO_MODE_OUTPUT);
@@ -583,53 +570,53 @@ static void display_spi_init(Context *ctx)
     gpio_set_level(DISPLAY_DC, 0);
     gpio_set_level(DISPLAY_CS, 0);
 
-    ret = spi_device_acquire_bus(handle, portMAX_DELAY);
+    ret = spi_device_acquire_bus(spi->spi_disp.handle, portMAX_DELAY);
     ESP_ERROR_CHECK(ret);
     display_reset();
 
     wait_busy_level(1);
 
-    writecommand(0x00);
-    writedata(0xEF);
-    writedata(0x08);
-    writecommand(0x01);
-    writedata(0x37);
-    writedata(0x00);
-    writedata(0x23);
-    writedata(0x23);
-    writecommand(0x03);
-    writedata(0x00);
-    writecommand(0x06);
-    writedata(0xC7);
-    writedata(0xC7);
-    writedata(0x1D);
-    writecommand(0x30);
-    writedata(0x3C);
-    writecommand(0x40);
-    writedata(0x00);
-    writecommand(0x50);
-    writedata(0x3F);
-    writecommand(0x60);
-    writedata(0x22);
-    writecommand(0x61);
-    writedata(0x02);
-    writedata(0x58);
-    writedata(0x01);
-    writedata(0xC0);
-    writecommand(0xE3);
-    writedata(0xAA);
-    writecommand(0x82);
-    writedata(0x80);
+    struct SPIDisplay *spi_disp = &spi->spi_disp;
+    writecommand(spi_disp, 0x00);
+    writedata(spi_disp, 0xEF);
+    writedata(spi_disp, 0x08);
+    writecommand(spi_disp, 0x01);
+    writedata(spi_disp, 0x37);
+    writedata(spi_disp, 0x00);
+    writedata(spi_disp, 0x23);
+    writedata(spi_disp, 0x23);
+    writecommand(spi_disp, 0x03);
+    writedata(spi_disp, 0x00);
+    writecommand(spi_disp, 0x06);
+    writedata(spi_disp, 0xC7);
+    writedata(spi_disp, 0xC7);
+    writedata(spi_disp, 0x1D);
+    writecommand(spi_disp, 0x30);
+    writedata(spi_disp, 0x3C);
+    writecommand(spi_disp, 0x40);
+    writedata(spi_disp, 0x00);
+    writecommand(spi_disp, 0x50);
+    writedata(spi_disp, 0x3F);
+    writecommand(spi_disp, 0x60);
+    writedata(spi_disp, 0x22);
+    writecommand(spi_disp, 0x61);
+    writedata(spi_disp, 0x02);
+    writedata(spi_disp, 0x58);
+    writedata(spi_disp, 0x01);
+    writedata(spi_disp, 0xC0);
+    writecommand(spi_disp, 0xE3);
+    writedata(spi_disp, 0xAA);
+    writecommand(spi_disp, 0x82);
+    writedata(spi_disp, 0x80);
 
     vTaskDelay(10);
 
-    writecommand(0x50);
-    writedata(0x37);
-    spi_device_release_bus(handle);
+    writecommand(spi_disp, 0x50);
+    writedata(spi_disp, 0x37);
+    spi_device_release_bus(spi->spi_disp.handle);
 
     struct ESP32PlatformData *platform = ctx->global->platform_data;
 
-    struct SPI *spi = malloc(sizeof(struct SPI));
     ctx->platform_data = spi;
 
     spi->ctx = ctx;
@@ -645,10 +632,10 @@ static void display_spi_init(Context *ctx)
 #if SELF_TEST
     for (int i = 0; i < 7; i++) {
         fprintf(stderr, "color: %i\n", i);
-        clear_screen(i);
+        clear_screen(ctx, i);
         vTaskDelay(30000 / portTICK_PERIOD_MS);
     }
-    clear_screen(1);
+    clear_screen(ctx, 1);
 
     while (1)
         ;

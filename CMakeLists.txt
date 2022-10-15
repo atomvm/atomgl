@@ -23,6 +23,7 @@ idf_component_register(SRCS
     "acep_5in65_7c.c"
     "ili934x_display_driver.c"
     "memory_display_driver.c"
+    "spi_display.c"
     PRIV_REQUIRES "libatomvm" "avm_sys" "sdmmc" "vfs" "fatfs")
 
 idf_build_set_property(LINK_OPTIONS
