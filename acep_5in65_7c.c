@@ -37,8 +37,13 @@
 #define DISPLAY_WIDTH 600
 #define DISPLAY_HEIGHT 448
 
+#define MISO_IO_NUM CONFIG_AVM_DISPLAY_MISO_IO_NUM
+#define MOSI_IO_NUM CONFIG_AVM_DISPLAY_MOSI_IO_NUM
+#define SCLK_IO_NUM CONFIG_AVM_DISPLAY_SCLK_IO_NUM
+
 #define DISPLAY_BUSY 23
-#define DISPLAY_DC 27
+#define RESET_IO_NUM CONFIG_AVM_DISPLAY_RESET_IO_NUM
+#define DISPLAY_DC CONFIG_AVM_DISPLAY_DC_IO_NUM
 
 #include "display_items.h"
 #include "font.c"
@@ -139,9 +144,9 @@ static void writedata(struct SPIDisplay *spi_disp, uint8_t data)
 
 static void display_reset()
 {
-    gpio_set_level(19, 0);
+    gpio_set_level(RESET_IO_NUM, 0);
     vTaskDelay(100);
-    gpio_set_level(19, 1);
+    gpio_set_level(RESET_IO_NUM, 1);
 }
 
 static void wait_busy_level(int level)
@@ -537,9 +542,9 @@ static void display_spi_init(Context *ctx, term opts)
 {
     esp_err_t ret;
     spi_bus_config_t buscfg = {
-        .miso_io_num = -1,
-        .mosi_io_num = 25,
-        .sclk_io_num = 26,
+        .miso_io_num = MISO_IO_NUM,
+        .mosi_io_num = MOSI_IO_NUM,
+        .sclk_io_num = SCLK_IO_NUM,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
         .max_transfer_sz = 0
