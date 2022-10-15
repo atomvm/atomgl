@@ -25,13 +25,24 @@
 
 #include <stdbool.h>
 
+#include <globalcontext.h>
+
 struct SPIDisplay
 {
     spi_device_handle_t handle;
     spi_transaction_t transaction;
 };
 
+struct SPIDisplayConfig
+{
+    int cs_gpio;
+    spi_host_device_t spi_host;
+};
+
+bool spi_display_init(struct SPIDisplay *spi_disp, struct SPIDisplayConfig *spi_config);
 bool spi_display_dmawrite(struct SPIDisplay *spi_data, int data_len, const void *data);
 bool spi_display_write(struct SPIDisplay *spi_data, int data_len, uint32_t data);
+void spi_display_init_config(struct SPIDisplayConfig *spi_config);
+bool spi_display_parse_config(struct SPIDisplayConfig *spi_config, term opts, GlobalContext *global);
 
 #endif

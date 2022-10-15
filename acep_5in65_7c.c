@@ -37,7 +37,6 @@
 #define DISPLAY_WIDTH 600
 #define DISPLAY_HEIGHT 448
 
-#define DISPLAY_CS 5
 #define DISPLAY_BUSY 23
 #define DISPLAY_DC 27
 
@@ -534,7 +533,7 @@ static void clear_screen(Context *ctx, int color)
 }
 #endif
 
-static void display_spi_init(Context *ctx)
+static void display_spi_init(Context *ctx, term opts)
 {
     esp_err_t ret;
     spi_bus_config_t buscfg = {
@@ -545,30 +544,25 @@ static void display_spi_init(Context *ctx)
         .quadhd_io_num = -1,
         .max_transfer_sz = 0
     };
-    spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = 1000000,
-        .mode = 0,
-        .spics_io_num = 5,
-        .queue_size = 1
-    };
-    ret = spi_bus_initialize(HSPI_HOST, &buscfg, 1);
-    ESP_ERROR_CHECK(ret);
 
     struct SPI *spi = malloc(sizeof(struct SPI));
     // TODO check here
 
-    ret = spi_bus_add_device(HSPI_HOST, &devcfg, &spi->spi_disp.handle);
+    ret = spi_bus_initialize(HSPI_HOST, &buscfg, 1);
     ESP_ERROR_CHECK(ret);
+
+    struct SPIDisplayConfig spi_config;
+    spi_display_init_config(&spi_config);
+    spi_display_parse_config(&spi_config, opts, ctx->global);
+    spi_display_init(&spi->spi_disp, &spi_config);
 
     gpio_set_direction(19, GPIO_MODE_OUTPUT);
     gpio_set_level(19, 1);
     gpio_set_direction(DISPLAY_DC, GPIO_MODE_OUTPUT);
     gpio_set_pull_mode(DISPLAY_DC, GPIO_PULLUP_ENABLE);
-    gpio_set_direction(DISPLAY_CS, GPIO_MODE_OUTPUT);
     gpio_set_direction(DISPLAY_BUSY, GPIO_MODE_INPUT);
     gpio_set_pull_mode(DISPLAY_BUSY, GPIO_PULLUP_ENABLE);
     gpio_set_level(DISPLAY_DC, 0);
-    gpio_set_level(DISPLAY_CS, 0);
 
     ret = spi_device_acquire_bus(spi->spi_disp.handle, portMAX_DELAY);
     ESP_ERROR_CHECK(ret);
@@ -654,6 +648,6 @@ Context *acep_5in65_7c_display_driver_create_port(GlobalContext *global, term op
 {
     Context *ctx = context_new(global);
     ctx->native_handler = display_driver_consume_mailbox;
-    display_spi_init(ctx);
+    display_spi_init(ctx, opts);
     return ctx;
 }
