@@ -37,10 +37,6 @@
 #define DISPLAY_WIDTH 600
 #define DISPLAY_HEIGHT 448
 
-#define MISO_IO_NUM CONFIG_AVM_DISPLAY_MISO_IO_NUM
-#define MOSI_IO_NUM CONFIG_AVM_DISPLAY_MOSI_IO_NUM
-#define SCLK_IO_NUM CONFIG_AVM_DISPLAY_SCLK_IO_NUM
-
 #define DISPLAY_BUSY 23
 #define RESET_IO_NUM CONFIG_AVM_DISPLAY_RESET_IO_NUM
 #define DISPLAY_DC CONFIG_AVM_DISPLAY_DC_IO_NUM
@@ -540,21 +536,10 @@ static void clear_screen(Context *ctx, int color)
 
 static void display_spi_init(Context *ctx, term opts)
 {
-    esp_err_t ret;
-    spi_bus_config_t buscfg = {
-        .miso_io_num = MISO_IO_NUM,
-        .mosi_io_num = MOSI_IO_NUM,
-        .sclk_io_num = SCLK_IO_NUM,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        .max_transfer_sz = 0
-    };
-
     struct SPI *spi = malloc(sizeof(struct SPI));
     // TODO check here
 
-    ret = spi_bus_initialize(HSPI_HOST, &buscfg, 1);
-    ESP_ERROR_CHECK(ret);
+    spi_display_bus_init();
 
     struct SPIDisplayConfig spi_config;
     spi_display_init_config(&spi_config);
@@ -569,7 +554,7 @@ static void display_spi_init(Context *ctx, term opts)
     gpio_set_pull_mode(DISPLAY_BUSY, GPIO_PULLUP_ENABLE);
     gpio_set_level(DISPLAY_DC, 0);
 
-    ret = spi_device_acquire_bus(spi->spi_disp.handle, portMAX_DELAY);
+    esp_err_t ret = spi_device_acquire_bus(spi->spi_disp.handle, portMAX_DELAY);
     ESP_ERROR_CHECK(ret);
     display_reset();
 

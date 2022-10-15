@@ -45,4 +45,6 @@ bool spi_display_write(struct SPIDisplay *spi_data, int data_len, uint32_t data)
 void spi_display_init_config(struct SPIDisplayConfig *spi_config);
 bool spi_display_parse_config(struct SPIDisplayConfig *spi_config, term opts, GlobalContext *global);
 
+void spi_display_bus_init();
+
 #endif

@@ -22,10 +22,21 @@
 
 #include <string.h>
 
+#include <esp_vfs_fat.h>
+#include <sdmmc_cmd.h>
+#include <driver/spi_master.h>
+
 #include <globalcontext.h>
 #include <interop.h>
 #include <term.h>
 #include <utils.h>
+
+#define MISO_IO_NUM CONFIG_AVM_DISPLAY_MISO_IO_NUM
+#define MOSI_IO_NUM CONFIG_AVM_DISPLAY_MOSI_IO_NUM
+#define SCLK_IO_NUM CONFIG_AVM_DISPLAY_SCLK_IO_NUM
+
+#define SD_ENABLE CONFIG_AVM_DISPLAY_SD_ENABLE
+#define SD_CS_IO_NUM CONFIG_AVM_DISPLAY_SD_CS_IO_NUM
 
 bool spi_display_dmawrite(struct SPIDisplay *spi_data, int data_len, const void *data)
 {
@@ -104,4 +115,64 @@ bool spi_display_init(struct SPIDisplay *spi_disp, struct SPIDisplayConfig *spi_
 void spi_display_init_config(struct SPIDisplayConfig *spi_config)
 {
     memset(spi_config, 0, sizeof(struct SPIDisplayConfig));
+}
+
+#if SD_ENABLE == true
+// sdcard init in display driver is quite an odd choice
+// however display and SD share the same bus
+static bool sdcard_init()
+{
+    ESP_LOGI("sdcard", "Trying SD init.");
+
+    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+    sdspi_slot_config_t slot_config = SDSPI_SLOT_CONFIG_DEFAULT();
+    slot_config.gpio_miso = MISO_IO_NUM;
+    slot_config.gpio_mosi = MOSI_IO_NUM;
+    slot_config.gpio_sck = SCLK_IO_NUM;
+    slot_config.gpio_cs = SD_CS_IO_NUM;
+    // This initializes the slot without card detect (CD) and write protect (WP) signals.
+    // Modify slot_config.gpio_cd and slot_config.gpio_wp if your board has these signals.
+
+    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
+        .format_if_mount_failed = false,
+        .max_files = 5,
+        .allocation_unit_size = 16 * 1024
+    };
+
+    sdmmc_card_t *card;
+    esp_err_t ret = esp_vfs_fat_sdmmc_mount("/sdcard", &host, &slot_config, &mount_config, &card);
+
+    if (ret != ESP_OK) {
+        if (ret == ESP_FAIL) {
+            ESP_LOGE("sdcard", "Failed to mount filesystem.");
+        } else {
+            ESP_LOGE("sdcard", "Failed to initialize the card (%s).", esp_err_to_name(ret));
+        }
+        return false;
+    }
+
+    sdmmc_card_print_info(stdout, card);
+
+    return true;
+}
+#endif
+
+void spi_display_bus_init()
+{
+#if SD_ENABLE == true
+    if (!sdcard_init()) {
+#endif
+        spi_bus_config_t buscfg = {
+            .miso_io_num = MISO_IO_NUM,
+            .mosi_io_num = MOSI_IO_NUM,
+            .sclk_io_num = SCLK_IO_NUM,
+            .quadwp_io_num = -1,
+            .quadhd_io_num = -1,
+        };
+
+        esp_err_t ret = spi_bus_initialize(HSPI_HOST, &buscfg, 1);
+        ESP_ERROR_CHECK(ret);
+#if SD_ENABLE == true
+    }
+#endif
 }
