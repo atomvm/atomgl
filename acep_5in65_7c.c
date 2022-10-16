@@ -359,11 +359,15 @@ static void do_update(Context *ctx, term display_list)
 
     struct SPIDisplay *spi_disp = &spi->spi_disp;
     spi_device_acquire_bus(spi_disp->handle, portMAX_DELAY);
+
+    // resolution command
     writecommand(spi_disp, 0x61);
     writedata(spi_disp, 0x02);
     writedata(spi_disp, 0x58);
     writedata(spi_disp, 0x01);
     writedata(spi_disp, 0xC0);
+
+    // update command
     writecommand(spi_disp, 0x10);
 
     gpio_set_level(DISPLAY_DC, 1);
@@ -394,10 +398,17 @@ static void do_update(Context *ctx, term display_list)
         spi_device_get_trans_result(spi->spi_disp.handle, &trans, portMAX_DELAY);
     }
 
+    // not sure if we should add 0x11, which is end of data command or not
+
+    // power on command
     writecommand(spi_disp, 0x04);
     wait_busy_level(1);
+
+    // refresh command
     writecommand(spi_disp, 0x12);
     wait_busy_level(1);
+
+    // power off command
     writecommand(spi_disp, 0x02);
     spi_device_release_bus(spi_disp->handle);
     wait_busy_level(0);
