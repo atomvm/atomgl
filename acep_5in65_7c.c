@@ -204,11 +204,11 @@ static int draw_image_x(uint8_t *line_buf, int xpos, int ypos, int max_line_len,
             uint8_t g = (img_pixel >> 16) & 0xFF;
             uint8_t b = (img_pixel >> 8) & 0xFF;
 
-            uint8_t c = dither_acep7(xpos, ypos, r, g, b);
+            uint8_t c = dither_acep7(xpos + drawn_pixels, ypos, r, g, b);
             draw_pixel_x(line_buf, xpos + drawn_pixels, c);
 
         } else if (visible_bg) {
-            uint8_t c = dither_acep7(xpos, ypos, bgcolor_r, bgcolor_g, bgcolor_b);
+            uint8_t c = dither_acep7(xpos + drawn_pixels, ypos, bgcolor_r, bgcolor_g, bgcolor_b);
             draw_pixel_x(line_buf, xpos + drawn_pixels, c);
 
         } else {
@@ -237,7 +237,7 @@ static int draw_rect_x(uint8_t *line_buf, int xpos, int ypos, int max_line_len, 
     }
 
     for (int j = xpos - x; j < width; j++) {
-        uint8_t c = dither_acep7(xpos + j, ypos, r, g, b);
+        uint8_t c = dither_acep7(xpos + drawn_pixels, ypos, r, g, b);
         draw_pixel_x(line_buf, xpos + drawn_pixels, c);
         drawn_pixels++;
     }
