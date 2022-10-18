@@ -49,18 +49,9 @@
 
 #include <math.h>
 
+#include "spi_display.h"
+
 #define DC_IO_NUM CONFIG_AVM_DISPLAY_DC_IO_NUM
-
-#define MISO_IO_NUM CONFIG_AVM_DISPLAY_MISO_IO_NUM
-#define MOSI_IO_NUM CONFIG_AVM_DISPLAY_MOSI_IO_NUM
-#define SCLK_IO_NUM CONFIG_AVM_DISPLAY_SCLK_IO_NUM
-#define SPI_CLOCK_HZ CONFIG_AVM_DISPLAY_SPI_CLOCK_HZ
-#define DISPLAY_CS_IO_NUM CONFIG_AVM_DISPLAY_CS_IO_NUM
-#define SPI_MODE 0
-#define ADDRESS_LEN_BITS 0
-
-#define SD_ENABLE CONFIG_AVM_ILI934X_SD_ENABLE
-#define SD_CS_IO_NUM CONFIG_AVM_ILI934X_SD_CS_IO_NUM
 
 #define CHAR_WIDTH 8
 
@@ -73,8 +64,7 @@
 
 struct SPI
 {
-    spi_device_handle_t handle;
-    spi_transaction_t transaction;
+    struct SPIDisplay spi_disp;
     Context *ctx;
     xQueueHandle replies_queue;
 
@@ -105,7 +95,7 @@ struct PendingReply
 static xQueueHandle display_messages_queue;
 
 static void display_driver_consume_mailbox(Context *ctx);
-static void display_init(Context *ctx, int cs_gpio);
+static void display_init(Context *ctx, term opts);
 
 int vcom = 0x0;
 static inline int get_vcom()
@@ -139,64 +129,6 @@ static int get_color(int x, int y, uint8_t r, uint8_t g, uint8_t b)
     // get closest
     float yval = 0.2126 * out_r + 0.7152 * out_g + 0.0722 * out_b;
     return yval >= 128;
-}
-
-#if SD_ENABLE == true
-// sdcard init in display driver is quite an odd choice
-// however display and SD share the same bus
-static bool sdcard_init()
-{
-    ESP_LOGI("sdcard", "Trying SD init.");
-
-    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    sdspi_slot_config_t slot_config = SDSPI_SLOT_CONFIG_DEFAULT();
-    slot_config.gpio_miso = MISO_IO_NUM;
-    slot_config.gpio_mosi = MOSI_IO_NUM;
-    slot_config.gpio_sck = SCLK_IO_NUM;
-    slot_config.gpio_cs = SD_CS_IO_NUM;
-    // This initializes the slot without card detect (CD) and write protect (WP) signals.
-    // Modify slot_config.gpio_cd and slot_config.gpio_wp if your board has these signals.
-
-    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
-        .format_if_mount_failed = false,
-        .max_files = 5,
-        .allocation_unit_size = 16 * 1024
-    };
-
-    sdmmc_card_t *card;
-    esp_err_t ret = esp_vfs_fat_sdmmc_mount("/sdcard", &host, &slot_config, &mount_config, &card);
-
-    if (ret != ESP_OK) {
-        if (ret == ESP_FAIL) {
-            ESP_LOGE("sdcard", "Failed to mount filesystem.");
-        } else {
-            ESP_LOGE("sdcard", "Failed to initialize the card (%s).", esp_err_to_name(ret));
-        }
-        return false;
-    }
-
-    sdmmc_card_print_info(stdout, card);
-
-    return true;
-}
-#endif
-
-static bool spidmawrite(struct SPI *spi_data, int data_len, const void *data)
-{
-    memset(&spi_data->transaction, 0, sizeof(spi_transaction_t));
-
-    spi_data->transaction.flags = 0;
-    spi_data->transaction.length = data_len * 8;
-    spi_data->transaction.addr = 0;
-    spi_data->transaction.tx_buffer = data;
-
-    int ret = spi_device_queue_trans(spi_data->handle, &spi_data->transaction, portMAX_DELAY);
-    if (UNLIKELY(ret != ESP_OK)) {
-        fprintf(stderr, "spidmawrite: transmit error\n");
-        return false;
-    }
-
-    return true;
 }
 
 static inline void draw_pixel_x(uint8_t *line_buf, int xpos, int color)
@@ -381,13 +313,13 @@ static void do_update(Context *ctx, term display_list)
     int memsize = 2 + 400 / 8 + 2;
     uint8_t *buf = screen->pixels;
 
-    spi_device_acquire_bus(spi->handle, portMAX_DELAY);
+    spi_device_acquire_bus(spi->spi_disp.handle, portMAX_DELAY);
     bool transaction_in_progress = false;
 
     for (int ypos = 0; ypos < screen_height; ypos++) {
         if (!screen->dma_out && transaction_in_progress) {
             spi_transaction_t *trans = NULL;
-            spi_device_get_trans_result(spi->handle, &trans, portMAX_DELAY);
+            spi_device_get_trans_result(spi->spi_disp.handle, &trans, portMAX_DELAY);
         }
 
         memset(buf + 2, 0xFF, DISPLAY_WIDTH / 8);
@@ -406,16 +338,16 @@ static void do_update(Context *ctx, term display_list)
         if (screen->dma_out) {
             if (transaction_in_progress) {
                 spi_transaction_t *trans = NULL;
-                spi_device_get_trans_result(spi->handle, &trans, portMAX_DELAY);
+                spi_device_get_trans_result(spi->spi_disp.handle, &trans, portMAX_DELAY);
             }
             void *tmp = screen->pixels;
             screen->pixels = screen->dma_out;
             buf = screen->pixels;
             screen->dma_out = tmp;
 
-            spidmawrite(spi, memsize, screen->dma_out);
+            spi_display_dmawrite(&spi->spi_disp, memsize, screen->dma_out);
         } else {
-            spidmawrite(spi, memsize, buf);
+            spi_display_dmawrite(&spi->spi_disp, memsize, buf);
         }
 
         transaction_in_progress = true;
@@ -423,10 +355,10 @@ static void do_update(Context *ctx, term display_list)
 
     if (transaction_in_progress) {
         spi_transaction_t *trans;
-        spi_device_get_trans_result(spi->handle, &trans, portMAX_DELAY);
+        spi_device_get_trans_result(spi->spi_disp.handle, &trans, portMAX_DELAY);
     }
 
-    spi_device_release_bus(spi->handle);
+    spi_device_release_bus(spi->spi_disp.handle);
     destroy_items(items, len);
 }
 
@@ -487,19 +419,9 @@ static void display_driver_consume_mailbox(Context *ctx)
 
 Context *memory_lcd_display_create_port(GlobalContext *global, term opts)
 {
-    int spi_cs_gpio_atom_index = globalcontext_insert_atom(global, ATOM_STR("\xB", "spi_cs_gpio"));
-    term spi_cs_gpio_atom = term_from_atom_index(spi_cs_gpio_atom_index);
-
-    term cs_gpio_term = interop_proplist_get_value(opts, spi_cs_gpio_atom);
-    if (cs_gpio_term == term_nil()) {
-        return NULL;
-    }
-
-    int cs_gpio = term_to_int(cs_gpio_term);
-
     Context *ctx = context_new(global);
     ctx->native_handler = display_driver_consume_mailbox;
-    display_init(ctx, cs_gpio);
+    display_init(ctx, opts);
     return ctx;
 }
 
@@ -538,8 +460,10 @@ static void display_callback(EventListener *listener)
     }
 }
 
-static void display_init(Context *ctx, int cs_gpio)
+static void display_init(Context *ctx, term opts)
 {
+    spi_display_bus_init();
+
     screen = malloc(sizeof(struct Screen));
     // FIXME: hardcoded width and height
     screen->w = 400;
@@ -558,28 +482,6 @@ static void display_init(Context *ctx, int cs_gpio)
         abort();
     }
 
-#if SD_ENABLE == true
-    if (!sdcard_init()) {
-#else
-    {
-#endif
-        spi_bus_config_t buscfg;
-        memset(&buscfg, 0, sizeof(spi_bus_config_t));
-        buscfg.miso_io_num = MISO_IO_NUM;
-        buscfg.mosi_io_num = MOSI_IO_NUM;
-        buscfg.sclk_io_num = SCLK_IO_NUM;
-        buscfg.quadwp_io_num = -1;
-        buscfg.quadhd_io_num = -1;
-
-        int ret = spi_bus_initialize(HSPI_HOST, &buscfg, 1);
-
-        if (ret == ESP_OK) {
-            fprintf(stderr, "initialized SPI\n");
-        } else {
-            fprintf(stderr, "spi_bus_initialize return code: %i\n", ret);
-        }
-    }
-
     display_messages_queue = xQueueCreate(32, sizeof(Message *));
 
     GlobalContext *glb = ctx->global;
@@ -595,25 +497,15 @@ static void display_init(Context *ctx, int cs_gpio)
     spi->listener.handler = display_callback;
     list_append(&platform->listeners, &spi->listener.listeners_list_head);
 
-    spi_device_interface_config_t devcfg;
-    memset(&devcfg, 0, sizeof(spi_device_interface_config_t));
-    devcfg.clock_speed_hz = 1 * 1000 * 1000; //SPI_CLOCK_HZ;
-    devcfg.mode = 1;
-    devcfg.spics_io_num = cs_gpio;
-    devcfg.queue_size = 32;
-    devcfg.address_bits = ADDRESS_LEN_BITS;
-    devcfg.flags = SPI_DEVICE_BIT_LSBFIRST | SPI_DEVICE_POSITIVE_CS;
-
-    devcfg.cs_ena_pretrans = 4; // it should be at least 3us
-    devcfg.cs_ena_posttrans = 2; // it should be at least 1us
-
-    int ret = spi_bus_add_device(HSPI_HOST, &devcfg, &spi->handle);
-
-    if (ret == ESP_OK) {
-        fprintf(stderr, "initialized SPI device\n");
-    } else {
-        fprintf(stderr, "spi_bus_add_device return code: %i\n", ret);
-    }
+    struct SPIDisplayConfig spi_config;
+    spi_display_init_config(&spi_config);
+    spi_config.mode = 0;
+    spi_config.cs_active_high = true;
+    spi_config.bit_lsb_first = true;
+    spi_config.cs_ena_pretrans = 4; // it should be at least 3us
+    spi_config.cs_ena_posttrans = 2; // it should be at least 1us
+    spi_display_parse_config(&spi_config, opts, ctx->global);
+    spi_display_init(&spi->spi_disp, &spi_config);
 
     gpio_set_direction(DC_IO_NUM, GPIO_MODE_OUTPUT);
     gpio_set_level(DC_IO_NUM, 1);

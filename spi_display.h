@@ -36,6 +36,11 @@ struct SPIDisplay
 struct SPIDisplayConfig
 {
     int cs_gpio;
+    int mode;
+    bool cs_active_high : 1;
+    bool bit_lsb_first : 1;
+    int cs_ena_pretrans;
+    int cs_ena_posttrans;
     spi_host_device_t spi_host;
 };
 
