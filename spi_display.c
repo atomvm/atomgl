@@ -100,8 +100,8 @@ bool spi_display_init(struct SPIDisplay *spi_disp, struct SPIDisplayConfig *spi_
     memset(spi_disp, 0, sizeof(struct SPIDisplay));
 
     spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = 1000000,
         .mode = spi_config->mode,
+        .clock_speed_hz = spi_config->clock_speed_hz,
         .flags = (spi_config->cs_active_high ? SPI_DEVICE_POSITIVE_CS : 0) |
             (spi_config->bit_lsb_first ? SPI_DEVICE_BIT_LSBFIRST : 0),
         .spics_io_num = spi_config->cs_gpio,

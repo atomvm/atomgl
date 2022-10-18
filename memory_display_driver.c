@@ -500,6 +500,7 @@ static void display_init(Context *ctx, term opts)
     struct SPIDisplayConfig spi_config;
     spi_display_init_config(&spi_config);
     spi_config.mode = 0;
+    spi_config.clock_speed_hz = 1000000;
     spi_config.cs_active_high = true;
     spi_config.bit_lsb_first = true;
     spi_config.cs_ena_pretrans = 4; // it should be at least 3us

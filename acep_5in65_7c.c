@@ -527,6 +527,7 @@ static void display_spi_init(Context *ctx, term opts)
 
     struct SPIDisplayConfig spi_config;
     spi_display_init_config(&spi_config);
+    spi_config.clock_speed_hz = 1000000;
     spi_display_parse_config(&spi_config, opts, ctx->global);
     spi_display_init(&spi->spi_disp, &spi_config);
 

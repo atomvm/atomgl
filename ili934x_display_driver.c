@@ -25,10 +25,9 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
+#include <driver/gpio.h>
 #include <driver/spi_master.h>
 #include <esp_heap_caps.h>
-#include <esp_vfs_fat.h>
-#include <sdmmc_cmd.h>
 
 #include <atom.h>
 #include <bif.h>
@@ -47,6 +46,8 @@
 
 #include <trace.h>
 
+#include "spi_display.h"
+
 #define ENABLE_ILI9342C CONFIG_AVM_ILI934X_ENABLE_ILI9342C
 #define ENABLE_TFT_INVON CONFIG_AVM_ILI934X_ENABLE_TFT_INVON
 
@@ -55,16 +56,8 @@
 #define RESET_IO_NUM CONFIG_AVM_DISPLAY_RESET_IO_NUM
 #define DC_IO_NUM CONFIG_AVM_DISPLAY_DC_IO_NUM
 
-#define MISO_IO_NUM CONFIG_AVM_DISPLAY_MISO_IO_NUM
-#define MOSI_IO_NUM CONFIG_AVM_DISPLAY_MOSI_IO_NUM
-#define SCLK_IO_NUM CONFIG_AVM_DISPLAY_SCLK_IO_NUM
 #define SPI_CLOCK_HZ CONFIG_AVM_DISPLAY_SPI_CLOCK_HZ
-#define DISPLAY_CS_IO_NUM CONFIG_AVM_DISPLAY_CS_IO_NUM
 #define SPI_MODE 0
-#define ADDRESS_LEN_BITS 0
-
-#define SD_ENABLE CONFIG_AVM_ILI934X_SD_ENABLE
-#define SD_CS_IO_NUM CONFIG_AVM_ILI934X_SD_CS_IO_NUM
 
 #define CHAR_WIDTH 8
 
@@ -120,8 +113,7 @@
 
 struct SPI
 {
-    spi_device_handle_t handle;
-    spi_transaction_t transaction;
+    struct SPIDisplay spi_disp;
     Context *ctx;
     xQueueHandle replies_queue;
 
@@ -229,93 +221,11 @@ static void display_init42c(struct SPI *spi);
 static void display_init41(struct SPI *spi);
 #endif
 
-#if SD_ENABLE == true
-// sdcard init in display driver is quite an odd choice
-// however display and SD share the same bus
-static bool sdcard_init()
-{
-    ESP_LOGI("sdcard", "Trying SD init.");
-
-    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    sdspi_slot_config_t slot_config = SDSPI_SLOT_CONFIG_DEFAULT();
-    slot_config.gpio_miso = MISO_IO_NUM;
-    slot_config.gpio_mosi = MOSI_IO_NUM;
-    slot_config.gpio_sck = SCLK_IO_NUM;
-    slot_config.gpio_cs = SD_CS_IO_NUM;
-    // This initializes the slot without card detect (CD) and write protect (WP) signals.
-    // Modify slot_config.gpio_cd and slot_config.gpio_wp if your board has these signals.
-
-    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
-        .format_if_mount_failed = false,
-        .max_files = 5,
-        .allocation_unit_size = 16 * 1024
-    };
-
-    sdmmc_card_t *card;
-    esp_err_t ret = esp_vfs_fat_sdmmc_mount("/sdcard", &host, &slot_config, &mount_config, &card);
-
-    if (ret != ESP_OK) {
-        if (ret == ESP_FAIL) {
-            ESP_LOGE("sdcard", "Failed to mount filesystem.");
-        } else {
-            ESP_LOGE("sdcard", "Failed to initialize the card (%s).", esp_err_to_name(ret));
-        }
-        return false;
-    }
-
-    sdmmc_card_print_info(stdout, card);
-
-    return true;
-}
-#endif
-
-static bool spiwrite(struct SPI *spi_data, int data_len, uint32_t data)
-{
-    memset(&spi_data->transaction, 0, sizeof(spi_transaction_t));
-
-    uint32_t tx_data = SPI_SWAP_DATA_TX(data, data_len);
-
-    spi_data->transaction.flags = SPI_TRANS_USE_TXDATA | SPI_TRANS_USE_RXDATA;
-    spi_data->transaction.length = data_len;
-    spi_data->transaction.addr = 0;
-    spi_data->transaction.tx_data[0] = tx_data;
-    spi_data->transaction.tx_data[1] = (tx_data >> 8) & 0xFF;
-    spi_data->transaction.tx_data[2] = (tx_data >> 16) & 0xFF;
-    spi_data->transaction.tx_data[3] = (tx_data >> 24) & 0xFF;
-
-    //TODO: int ret = spi_device_queue_trans(spi_data->handle, &spi_data->transaction, portMAX_DELAY);
-    int ret = spi_device_polling_transmit(spi_data->handle, &spi_data->transaction);
-    if (UNLIKELY(ret != ESP_OK)) {
-        fprintf(stderr, "spiwrite: transmit error\n");
-        return false;
-    }
-
-    return true;
-}
-
-static bool spidmawrite(struct SPI *spi_data, int data_len, const void *data)
-{
-    memset(&spi_data->transaction, 0, sizeof(spi_transaction_t));
-
-    spi_data->transaction.flags = 0;
-    spi_data->transaction.length = data_len * 8;
-    spi_data->transaction.addr = 0;
-    spi_data->transaction.tx_buffer = data;
-
-    int ret = spi_device_queue_trans(spi_data->handle, &spi_data->transaction, portMAX_DELAY);
-    if (UNLIKELY(ret != ESP_OK)) {
-        fprintf(stderr, "spidmawrite: transmit error\n");
-        return false;
-    }
-
-    return true;
-}
-
 static inline void writedata(struct SPI *spi, uint32_t data)
 {
-    spi_device_acquire_bus(spi->handle, portMAX_DELAY);
-    spiwrite(spi, 8, data);
-    spi_device_release_bus(spi->handle);
+    spi_device_acquire_bus(spi->spi_disp.handle, portMAX_DELAY);
+    spi_display_write(&spi->spi_disp, 8, data);
+    spi_device_release_bus(spi->spi_disp.handle);
 }
 
 static inline void writecommand(struct SPI *spi, uint8_t command)
@@ -328,14 +238,14 @@ static inline void writecommand(struct SPI *spi, uint8_t command)
 static inline void set_screen_paint_area(struct SPI *spi, int x, int y, int width, int height)
 {
     writecommand(spi, TFT_CASET);
-    spi_device_acquire_bus(spi->handle, portMAX_DELAY);
-    spiwrite(spi, 32, (x << 16) | ((x + width) - 1));
-    spi_device_release_bus(spi->handle);
+    spi_device_acquire_bus(spi->spi_disp.handle, portMAX_DELAY);
+    spi_display_write(&spi->spi_disp, 32, (x << 16) | ((x + width) - 1));
+    spi_device_release_bus(spi->spi_disp.handle);
 
     writecommand(spi, TFT_PASET);
-    spi_device_acquire_bus(spi->handle, portMAX_DELAY);
-    spiwrite(spi, 32, (y << 16) | ((y + height) - 1));
-    spi_device_release_bus(spi->handle);
+    spi_device_acquire_bus(spi->spi_disp.handle, portMAX_DELAY);
+    spi_display_write(&spi->spi_disp, 32, (y << 16) | ((y + height) - 1));
+    spi_device_release_bus(spi->spi_disp.handle);
 }
 
 static int draw_image_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *item)
@@ -649,7 +559,7 @@ static void do_update(Context *ctx, term display_list)
 
     set_screen_paint_area(spi, 0, 0, screen_width, screen_height);
     writecommand(spi, TFT_RAMWR);
-    spi_device_acquire_bus(spi->handle, portMAX_DELAY);
+    spi_device_acquire_bus(spi->spi_disp.handle, portMAX_DELAY);
 
     bool transaction_in_progress = false;
 
@@ -664,23 +574,23 @@ static void do_update(Context *ctx, term display_list)
             spi_transaction_t *trans;
             // I did a quick measurement, and most of the time is spent waiting for DMA transaction
             // eg. 23 us spent in draw_x, 188 us spent in spi_device_get_trans_result
-            spi_device_get_trans_result(spi->handle, &trans, portMAX_DELAY);
+            spi_device_get_trans_result(spi->spi_disp.handle, &trans, portMAX_DELAY);
         }
 
         //NEW CODE
         void *tmp = screen->pixels;
         screen->pixels = screen->pixels_out;
         screen->pixels_out = tmp;
-        spidmawrite(spi, screen_width * sizeof(uint16_t), screen->pixels_out);
+        spi_display_dmawrite(&spi->spi_disp, screen_width * sizeof(uint16_t), screen->pixels_out);
         transaction_in_progress = true;
     }
 
     if (transaction_in_progress) {
         spi_transaction_t *trans;
-        spi_device_get_trans_result(spi->handle, &trans, portMAX_DELAY);
+        spi_device_get_trans_result(spi->spi_disp.handle, &trans, portMAX_DELAY);
     }
 
-    spi_device_release_bus(spi->handle);
+    spi_device_release_bus(spi->spi_disp.handle);
 
     destroy_items(items, len);
 }
@@ -700,13 +610,13 @@ void draw_buffer(struct SPI *spi, int x, int y, int width, int height, const voi
 
     uint16_t *tmpbuf = heap_caps_malloc(buf_pixel_size * sizeof(uint16_t), MALLOC_CAP_DMA);
 
-    spi_device_acquire_bus(spi->handle, portMAX_DELAY);
+    spi_device_acquire_bus(spi->spi_disp.handle, portMAX_DELAY);
     for (int i = 0; i < chunks; i++) {
         const uint16_t *data_b = data + 1024 * i;
         for (int j = 0; j < 1024; j++) {
             tmpbuf[j] = SPI_SWAP_DATA_TX(data_b[j], 16);
         }
-        spidmawrite(spi, buf_pixel_size * sizeof(uint16_t), tmpbuf);
+        spi_display_dmawrite(&spi->spi_disp, buf_pixel_size * sizeof(uint16_t), tmpbuf);
     }
     int last_chunk_size = dest_size - chunks * 1024;
     if (last_chunk_size) {
@@ -714,9 +624,9 @@ void draw_buffer(struct SPI *spi, int x, int y, int width, int height, const voi
         for (int j = 0; j < 1024; j++) {
             tmpbuf[j] = SPI_SWAP_DATA_TX(data_b[j], 16);
         }
-        spidmawrite(spi, last_chunk_size * sizeof(uint16_t), tmpbuf);
+        spi_display_dmawrite(&spi->spi_disp, last_chunk_size * sizeof(uint16_t), tmpbuf);
     }
-    spi_device_release_bus(spi->handle);
+    spi_device_release_bus(spi->spi_disp.handle);
 
     free(tmpbuf);
 }
@@ -855,27 +765,7 @@ static void display_init(Context *ctx, term opts)
     screen->pixels = heap_caps_malloc(screen->w * sizeof(uint16_t), MALLOC_CAP_DMA);
     screen->pixels_out = heap_caps_malloc(screen->w * sizeof(uint16_t), MALLOC_CAP_DMA);
 
-#if SD_ENABLE == true
-    if (!sdcard_init()) {
-#else
-    {
-#endif
-        spi_bus_config_t buscfg;
-        memset(&buscfg, 0, sizeof(spi_bus_config_t));
-        buscfg.miso_io_num = MISO_IO_NUM;
-        buscfg.mosi_io_num = MOSI_IO_NUM;
-        buscfg.sclk_io_num = SCLK_IO_NUM;
-        buscfg.quadwp_io_num = -1;
-        buscfg.quadhd_io_num = -1;
-
-        int ret = spi_bus_initialize(HSPI_HOST, &buscfg, 1);
-
-        if (ret == ESP_OK) {
-            fprintf(stderr, "initialized SPI\n");
-        } else {
-            fprintf(stderr, "spi_bus_initialize return code: %i\n", ret);
-        }
-    }
+    spi_display_bus_init();
 
     display_messages_queue = xQueueCreate(32, sizeof(Message *));
 
@@ -892,31 +782,22 @@ static void display_init(Context *ctx, term opts)
     spi->listener.handler = display_callback;
     list_append(&platform->listeners, &spi->listener.listeners_list_head);
 
-    spi_device_interface_config_t devcfg;
-    memset(&devcfg, 0, sizeof(spi_device_interface_config_t));
-    devcfg.clock_speed_hz = SPI_CLOCK_HZ;
-    devcfg.mode = SPI_MODE;
-    devcfg.spics_io_num = DISPLAY_CS_IO_NUM;
-    devcfg.queue_size = 32;
-    devcfg.address_bits = ADDRESS_LEN_BITS;
-
-    int ret = spi_bus_add_device(HSPI_HOST, &devcfg, &spi->handle);
-
-    if (ret == ESP_OK) {
-        fprintf(stderr, "initialized SPI device\n");
-    } else {
-        fprintf(stderr, "spi_bus_add_device return code: %i\n", ret);
-    }
+    struct SPIDisplayConfig spi_config;
+    spi_display_init_config(&spi_config);
+    spi_config.mode = SPI_MODE;
+    spi_config.clock_speed_hz = SPI_CLOCK_HZ;
+    spi_display_parse_config(&spi_config, opts, ctx->global);
+    spi_display_init(&spi->spi_disp, &spi_config);
 
     // Reset
-    spi_device_acquire_bus(spi->handle, portMAX_DELAY);
+    spi_device_acquire_bus(spi->spi_disp.handle, portMAX_DELAY);
     gpio_set_direction(RESET_IO_NUM, GPIO_MODE_OUTPUT);
     gpio_set_level(RESET_IO_NUM, 1);
     vTaskDelay(50 / portTICK_PERIOD_MS);
     gpio_set_level(RESET_IO_NUM, 0);
     vTaskDelay(50 / portTICK_PERIOD_MS);
     gpio_set_level(RESET_IO_NUM, 1);
-    spi_device_release_bus(spi->handle);
+    spi_device_release_bus(spi->spi_disp.handle);
 
     gpio_set_direction(BACKLIGHT_IO_NUM, GPIO_MODE_OUTPUT);
     gpio_set_level(BACKLIGHT_IO_NUM, 1);

@@ -37,6 +37,7 @@ struct SPIDisplayConfig
 {
     int cs_gpio;
     int mode;
+    int clock_speed_hz;
     bool cs_active_high : 1;
     bool bit_lsb_first : 1;
     int cs_ena_pretrans;

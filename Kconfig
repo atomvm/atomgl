@@ -20,10 +20,6 @@ config AVM_DISPLAY_SPI_CLOCK_HZ
     int "SPI Clock Hz"
     default 27000000
 
-config AVM_DISPLAY_CS_IO_NUM
-    int "Display CS IO Num"
-    default 14
-
 config AVM_ILI934X_BACKLIGHT_IO_NUM
     int "Backlight IO Num"
     default 32
