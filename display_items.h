@@ -1,5 +1,5 @@
 /*
- * This file is part of AtomVM.
+ * This file is part of AtomGL.
  *
  * Copyright 2020-2022 Davide Bettio <davide@uninstall.it>
  *
