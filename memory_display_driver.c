@@ -112,21 +112,36 @@ static inline int get_vcom()
 static int get_color(int x, int y, uint8_t r, uint8_t g, uint8_t b)
 {
     // dither
-    const uint8_t m[4][4] = {
-        { 0, 8, 2, 10 },
-        { 12, 4, 14, 6 },
-        { 3, 11, 1, 9 },
-        { 15, 7, 13, 5 }
+
+    /*
+     * Original bayer matrix
+     *   { 0, 8, 2, 10 },
+     *   { 12, 4, 14, 6 },
+     *   { 3, 11, 1, 9 },
+     *   { 15, 7, 13, 5 }
+     *
+     *   The following is calculated applying the following code element by element
+     *   r = 255 / values / 4
+     *   roundf(63.75 * ((float) m[x % 4][y % 4] * 0.0625 - 0.5));
+     */
+    const int m[4][4] = {
+        { -32, 0, -24, 8 },
+        { 16, -16, 24, -8 },
+        { -20, 12, -28, 4 },
+        { 28, -4, 20, -12 }
     };
 
-    // r = 255 / values / 4
-    float out_r = r + roundf(63.75 * ((float) m[x % 4][y % 4] * 0.0625 - 0.5));
-    float out_g = g + roundf(63.75 * ((float) m[x % 4][y % 4] * 0.0625 - 0.5));
-    float out_b = b + roundf(63.75 * ((float) m[x % 4][y % 4] * 0.0625 - 0.5));
+    int v = m[x % 4][y % 4];
+    int out_r = r + v;
+    int out_g = g + v;
+    int out_b = b + v;
     // end of dither
 
     // get closest
-    float yval = 0.2126 * out_r + 0.7152 * out_g + 0.0722 * out_b;
+    // float yval = 0.2126 * out_r + 0.7152 * out_g + 0.0722 * out_b;
+    // the following is a fast formula
+    int yval = ((out_r << 1) + out_r + (out_g << 2) + out_b) >> 3;
+
     return yval >= 128;
 }
 
