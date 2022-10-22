@@ -49,9 +49,8 @@
 
 #include <math.h>
 
+#include "display_common.h"
 #include "spi_display.h"
-
-#define DC_IO_NUM CONFIG_AVM_DISPLAY_DC_IO_NUM
 
 #define CHAR_WIDTH 8
 
@@ -508,8 +507,14 @@ static void display_init(Context *ctx, term opts)
     spi_display_parse_config(&spi_config, opts, ctx->global);
     spi_display_init(&spi->spi_disp, &spi_config);
 
-    gpio_set_direction(DC_IO_NUM, GPIO_MODE_OUTPUT);
-    gpio_set_level(DC_IO_NUM, 1);
+    int display_enable_gpio;
+    bool ok = display_common_gpio_from_opts(
+        opts, ATOM_STR("\x13", "display_enable_gpio"), &display_enable_gpio, glb);
+
+    if (ok) {
+        gpio_set_direction(display_enable_gpio, GPIO_MODE_OUTPUT);
+        gpio_set_level(display_enable_gpio, 1);
+    }
 
     xTaskCreate(process_messages, "display", 10000, spi, 1, NULL);
 }
