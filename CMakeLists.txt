@@ -19,6 +19,7 @@
 #
 
 idf_component_register(SRCS
+    "display_common.c"
     "display_driver.c"
     "acep_5in65_7c.c"
     "ili934x_display_driver.c"

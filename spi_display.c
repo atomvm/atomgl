@@ -31,6 +31,8 @@
 #include <term.h>
 #include <utils.h>
 
+#include "display_common.h"
+
 #define MISO_IO_NUM CONFIG_AVM_DISPLAY_MISO_IO_NUM
 #define MOSI_IO_NUM CONFIG_AVM_DISPLAY_MOSI_IO_NUM
 #define SCLK_IO_NUM CONFIG_AVM_DISPLAY_SCLK_IO_NUM
@@ -82,17 +84,9 @@ bool spi_display_write(struct SPIDisplay *spi_data, int data_len, uint32_t data)
 
 bool spi_display_parse_config(struct SPIDisplayConfig *spi_config, term opts, GlobalContext *global)
 {
-    int spi_cs_gpio_atom_index = globalcontext_insert_atom(global, ATOM_STR("\xB", "spi_cs_gpio"));
-    term spi_cs_gpio_atom = term_from_atom_index(spi_cs_gpio_atom_index);
-
-    term cs_gpio_term = interop_proplist_get_value(opts, spi_cs_gpio_atom);
-    if (cs_gpio_term == term_nil()) {
-        return false;
-    }
-
-    spi_config->cs_gpio = term_to_int(cs_gpio_term);
-
-    return true;
+    bool ok = display_common_gpio_from_opts(
+        opts, ATOM_STR("\xB", "spi_cs_gpio"), &spi_config->cs_gpio, global);
+    return ok;
 }
 
 bool spi_display_init(struct SPIDisplay *spi_disp, struct SPIDisplayConfig *spi_config)
