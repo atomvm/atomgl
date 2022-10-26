@@ -48,6 +48,8 @@
 
 #include "spi_display.h"
 
+#define ENABLE_INIT_SPI_BUS CONFIG_AVM_DISPLAY_INIT_SPI_BUS
+
 #define ENABLE_ILI9342C CONFIG_AVM_ILI934X_ENABLE_ILI9342C
 #define ENABLE_TFT_INVON CONFIG_AVM_ILI934X_ENABLE_TFT_INVON
 
@@ -765,7 +767,9 @@ static void display_init(Context *ctx, term opts)
     screen->pixels = heap_caps_malloc(screen->w * sizeof(uint16_t), MALLOC_CAP_DMA);
     screen->pixels_out = heap_caps_malloc(screen->w * sizeof(uint16_t), MALLOC_CAP_DMA);
 
+#if ENABLE_INIT_SPI_BUS == true
     spi_display_bus_init();
+#endif
 
     display_messages_queue = xQueueCreate(32, sizeof(Message *));
 

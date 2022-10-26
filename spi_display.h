@@ -35,6 +35,7 @@ struct SPIDisplay
 
 struct SPIDisplayConfig
 {
+    spi_host_device_t host_dev;
     int cs_gpio;
     int mode;
     int clock_speed_hz;
@@ -42,7 +43,6 @@ struct SPIDisplayConfig
     bool bit_lsb_first : 1;
     int cs_ena_pretrans;
     int cs_ena_posttrans;
-    spi_host_device_t spi_host;
 };
 
 bool spi_display_init(struct SPIDisplay *spi_disp, struct SPIDisplayConfig *spi_config);

@@ -25,7 +25,7 @@ idf_component_register(SRCS
     "ili934x_display_driver.c"
     "memory_display_driver.c"
     "spi_display.c"
-    PRIV_REQUIRES "libatomvm" "avm_sys" "sdmmc" "vfs" "fatfs")
+    PRIV_REQUIRES "libatomvm" "avm_sys" "avm_builtins" "sdmmc" "vfs" "fatfs")
 
 idf_build_set_property(LINK_OPTIONS
 "-Wl,--whole-archive ${CMAKE_CURRENT_BINARY_DIR}/lib${COMPONENT_NAME}.a -Wl,--no-whole-archive"

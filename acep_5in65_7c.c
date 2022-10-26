@@ -37,6 +37,8 @@
 #define DISPLAY_WIDTH 600
 #define DISPLAY_HEIGHT 448
 
+#define ENABLE_INIT_SPI_BUS CONFIG_AVM_DISPLAY_INIT_SPI_BUS
+
 #define DISPLAY_BUSY 23
 #define RESET_IO_NUM CONFIG_AVM_DISPLAY_RESET_IO_NUM
 #define DISPLAY_DC CONFIG_AVM_DISPLAY_DC_IO_NUM
@@ -523,7 +525,9 @@ static void display_spi_init(Context *ctx, term opts)
     struct SPI *spi = malloc(sizeof(struct SPI));
     // TODO check here
 
+#if ENABLE_INIT_SPI_BUS == true
     spi_display_bus_init();
+#endif
 
     struct SPIDisplayConfig spi_config;
     spi_display_init_config(&spi_config);

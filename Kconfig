@@ -4,6 +4,10 @@
 
 menu "AtomVM Display Driver"
 
+config AVM_DISPLAY_INIT_SPI_BUS
+    bool "Initialize SPI bus"
+    default y
+
 config AVM_DISPLAY_MISO_IO_NUM
     int "SPI MISO IO Num"
     default 19
