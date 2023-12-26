@@ -60,4 +60,4 @@ Context *display_create_port(GlobalContext *global, term opts)
     return ctx;
 }
 
-REGISTER_PORT_DRIVER(display, NULL, display_create_port)
+REGISTER_PORT_DRIVER(display, NULL, NULL, display_create_port)

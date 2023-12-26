@@ -39,6 +39,7 @@
 #include <interop.h>
 #include <mailbox.h>
 #include <module.h>
+#include <port.h>
 #include <sys.h>
 #include <term.h>
 #include <utils.h>
@@ -67,9 +68,6 @@ struct SPI
 {
     struct SPIDisplay spi_disp;
     Context *ctx;
-    xQueueHandle replies_queue;
-
-    EventListener listener;
 };
 
 #include "display_items.h"
@@ -95,7 +93,7 @@ struct PendingReply
 
 static xQueueHandle display_messages_queue;
 
-static void display_driver_consume_mailbox(Context *ctx);
+static NativeHandlerResult display_driver_consume_mailbox(Context *ctx);
 static void display_init(Context *ctx, term opts);
 
 int vcom = 0x0;
@@ -378,15 +376,21 @@ static void do_update(Context *ctx, term display_list)
     destroy_items(items, len);
 }
 
+static void send_message(term pid, term message, GlobalContext *global);
+
 static void process_message(Message *message, Context *ctx)
 {
-    term msg = message->message;
+    GenMessage gen_message;
+    if (UNLIKELY(port_parse_gen_message(message->message, &gen_message) != GenCallMessage)) {
+        fprintf(stderr, "Received invalid message.");
+        AVM_ABORT();
+    }
 
-    term from = term_get_tuple_element(msg, 1);
-    term req = term_get_tuple_element(msg, 2);
+    term req = gen_message.req;
+    if (UNLIKELY(!term_is_tuple(req) || term_get_tuple_arity(req) < 1)) {
+        AVM_ABORT();
+    }
     term cmd = term_get_tuple_element(req, 0);
-
-    struct SPI *spi = ctx->platform_data;
 
     if (cmd == context_make_atom(ctx, "\x6"
                                       "update")) {
@@ -401,16 +405,13 @@ static void process_message(Message *message, Context *ctx)
 #endif
     }
 
-    term pid = term_get_tuple_element(from, 0);
-    term ref = term_get_tuple_element(from, 1);
+    BEGIN_WITH_STACK_HEAP(TUPLE_SIZE(2) + REF_SIZE, heap);
+    term return_tuple = term_alloc_tuple(2, &heap);
+    term_put_tuple_element(return_tuple, 0, gen_message.ref);
+    term_put_tuple_element(return_tuple, 1, OK_ATOM);
 
-    struct PendingReply pending = {
-        .pending_call_pid = pid,
-        .pending_call_ref_ticks = term_to_ref_ticks(ref)
-    };
-
-    xQueueSend(spi->replies_queue, &pending, 1);
-    xQueueSend(event_queue, &spi, 1);
+    send_message(gen_message.pid, return_tuple, ctx->global);
+    END_WITH_STACK_HEAP(heap, ctx->global);
 }
 
 static void process_messages(void *arg)
@@ -421,16 +422,21 @@ static void process_messages(void *arg)
         Message *message;
         xQueueReceive(display_messages_queue, &message, portMAX_DELAY);
         process_message(message, args->ctx);
-        free(message);
+
+        BEGIN_WITH_STACK_HEAP(1, temp_heap);
+        mailbox_message_dispose(&message->base, &temp_heap);
+        END_WITH_STACK_HEAP(temp_heap, args->ctx->global);
     }
 }
 
-static void display_driver_consume_mailbox(Context *ctx)
+static NativeHandlerResult display_driver_consume_mailbox(Context *ctx)
 {
-    while (!list_is_empty(&ctx->mailbox)) {
-        Message *message = mailbox_dequeue(ctx);
-        xQueueSend(display_messages_queue, &message, 1);
-    }
+    MailboxMessage *mbox_msg = mailbox_take_message(&ctx->mailbox);
+    Message *msg = CONTAINER_OF(mbox_msg, Message, base);
+
+    xQueueSend(display_messages_queue, &msg, 1);
+
+    return NativeContinue;
 }
 
 Context *memory_lcd_display_create_port(GlobalContext *global, term opts)
@@ -444,36 +450,7 @@ Context *memory_lcd_display_create_port(GlobalContext *global, term opts)
 static void send_message(term pid, term message, GlobalContext *global)
 {
     int local_process_id = term_to_local_process_id(pid);
-    Context *target = globalcontext_get_process(global, local_process_id);
-    if (LIKELY(target)) {
-        mailbox_send(target, message);
-    }
-}
-
-static void display_callback(EventListener *listener)
-{
-    struct SPI *spi = listener->data;
-    Context *ctx = spi->ctx;
-
-    struct PendingReply pending;
-    if (xQueueReceive(spi->replies_queue, &pending, 1)) {
-        int reply_size = TUPLE_SIZE(2) + REF_SIZE + TUPLE_SIZE(3);
-        if (UNLIKELY(memory_ensure_free(ctx, reply_size) != MEMORY_GC_OK)) {
-            abort();
-        }
-        term from_tuple = term_alloc_tuple(2, ctx);
-        term_put_tuple_element(from_tuple, 0, pending.pending_call_pid);
-        term ref = term_from_ref_ticks(pending.pending_call_ref_ticks, ctx);
-        term_put_tuple_element(from_tuple, 1, ref);
-
-        term return_tuple = term_alloc_tuple(3, ctx);
-        term_put_tuple_element(return_tuple, 0, context_make_atom(ctx, "\x6"
-                                                                       "$reply"));
-        term_put_tuple_element(return_tuple, 1, from_tuple);
-        term_put_tuple_element(return_tuple, 2, OK_ATOM);
-
-        send_message(pending.pending_call_pid, return_tuple, ctx->global);
-    }
+    globalcontext_send_message(global, local_process_id, message);
 }
 
 static void display_init(Context *ctx, term opts)
@@ -503,17 +480,11 @@ static void display_init(Context *ctx, term opts)
     display_messages_queue = xQueueCreate(32, sizeof(Message *));
 
     GlobalContext *glb = ctx->global;
-    struct ESP32PlatformData *platform = glb->platform_data;
 
     struct SPI *spi = malloc(sizeof(struct SPI));
     ctx->platform_data = spi;
 
     spi->ctx = ctx;
-    spi->replies_queue = xQueueCreate(32, sizeof(struct PendingReply));
-    spi->listener.sender = spi;
-    spi->listener.data = spi;
-    spi->listener.handler = display_callback;
-    list_append(&platform->listeners, &spi->listener.listeners_list_head);
 
     struct SPIDisplayConfig spi_config;
     spi_display_init_config(&spi_config);

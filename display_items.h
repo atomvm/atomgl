@@ -21,6 +21,12 @@
 #include <context.h>
 #include <stdint.h>
 
+// TODO: deprecated helper, remove this
+static inline term context_make_atom(Context *ctx, AtomString string)
+{
+    return globalcontext_make_atom(ctx->global, string);
+}
+
 enum primitive
 {
     Invalid = 0,
