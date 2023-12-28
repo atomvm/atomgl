@@ -260,7 +260,7 @@ static int draw_image_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *i
     int x = item->x;
     int y = item->y;
 
-    uint16_t bgcolor;
+    uint16_t bgcolor = 0;
     bool visible_bg;
     if (item->brcolor != 0) {
         bgcolor = rgba8888_color_to_rgb565(screen, item->brcolor);
