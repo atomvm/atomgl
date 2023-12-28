@@ -497,13 +497,12 @@ static void display_init(Context *ctx, term opts)
     spi_display_parse_config(&spi_config, opts, ctx->global);
     spi_display_init(&spi->spi_disp, &spi_config);
 
-    int display_enable_gpio;
-    bool ok = display_common_gpio_from_opts(
-        opts, ATOM_STR("\x13", "display_enable_gpio"), &display_enable_gpio, glb);
+    int en_gpio;
+    bool ok = display_common_gpio_from_opts(opts, ATOM_STR("\x2", "en"), &en_gpio, glb);
 
     if (ok) {
-        gpio_set_direction(display_enable_gpio, GPIO_MODE_OUTPUT);
-        gpio_set_level(display_enable_gpio, 1);
+        gpio_set_direction(en_gpio, GPIO_MODE_OUTPUT);
+        gpio_set_level(en_gpio, 1);
     }
 
     xTaskCreate(process_messages, "display", 10000, spi, 1, NULL);

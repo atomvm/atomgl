@@ -93,7 +93,7 @@ bool spi_display_write(struct SPIDisplay *spi_data, int data_len, uint32_t data)
 bool spi_display_parse_config(struct SPIDisplayConfig *spi_config, term opts, GlobalContext *global)
 {
     bool ok = display_common_gpio_from_opts(
-        opts, ATOM_STR("\xB", "spi_cs_gpio"), &spi_config->cs_gpio, global);
+        opts, ATOM_STR("\x2", "cs"), &spi_config->cs_gpio, global);
 
     if (!ok) {
         return false;
