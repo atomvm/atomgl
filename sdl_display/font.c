@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-FileCopyrightText: Linux kernel developers et al.
+// See also lib/fonts/font_8x16.c
+
 #define FONTDATAMAX 4096
 
 static const unsigned char fontdata[FONTDATAMAX] = {
