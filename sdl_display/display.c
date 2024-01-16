@@ -39,7 +39,7 @@
 #define DEPTH 32
 
 #define CHAR_WIDTH 8
-#include "font.c"
+#include "../font.c"
 
 struct DisplayOpts
 {
