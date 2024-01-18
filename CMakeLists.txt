@@ -25,6 +25,7 @@ idf_component_register(SRCS
     "ili934x_display_driver.c"
     "memory_display_driver.c"
     "spi_display.c"
+    "backlight_gpio.c"
     PRIV_REQUIRES "libatomvm" "avm_sys" "avm_builtins" "sdmmc" "vfs" "fatfs")
 
 idf_build_set_property(LINK_OPTIONS

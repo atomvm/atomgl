@@ -47,14 +47,13 @@
 
 #include <trace.h>
 
+#include "backlight_gpio.h"
 #include "spi_display.h"
 
 #define ENABLE_INIT_SPI_BUS CONFIG_AVM_DISPLAY_INIT_SPI_BUS
 
 #define ENABLE_ILI9342C CONFIG_AVM_ILI934X_ENABLE_ILI9342C
 #define ENABLE_TFT_INVON CONFIG_AVM_ILI934X_ENABLE_TFT_INVON
-
-#define BACKLIGHT_IO_NUM CONFIG_AVM_ILI934X_BACKLIGHT_IO_NUM
 
 #define RESET_IO_NUM CONFIG_AVM_DISPLAY_RESET_IO_NUM
 #define DC_IO_NUM CONFIG_AVM_DISPLAY_DC_IO_NUM
@@ -779,9 +778,6 @@ static void display_init(Context *ctx, term opts)
     gpio_set_level(RESET_IO_NUM, 1);
     spi_device_release_bus(spi->spi_disp.handle);
 
-    gpio_set_direction(BACKLIGHT_IO_NUM, GPIO_MODE_OUTPUT);
-    gpio_set_level(BACKLIGHT_IO_NUM, 1);
-
     gpio_set_direction(DC_IO_NUM, GPIO_MODE_OUTPUT);
 
     writecommand(spi, TFT_SWRST);
@@ -805,6 +801,11 @@ static void display_init(Context *ctx, term opts)
 #endif
 
     set_rotation(spi, 0);
+
+    struct BacklightGPIOConfig backlight_config;
+    backlight_gpio_init_config(&backlight_config);
+    backlight_gpio_parse_config(&backlight_config, opts, ctx->global);
+    backlight_gpio_init(&backlight_config);
 
     xTaskCreate(process_messages, "display", 10000, spi, 1, NULL);
 }
