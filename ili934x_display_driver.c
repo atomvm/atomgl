@@ -48,17 +48,11 @@
 #include <trace.h>
 
 #include "backlight_gpio.h"
+#include "display_common.h"
 #include "spi_display.h"
 
 #define ENABLE_INIT_SPI_BUS CONFIG_AVM_DISPLAY_INIT_SPI_BUS
-
-#define ENABLE_ILI9342C CONFIG_AVM_ILI934X_ENABLE_ILI9342C
-#define ENABLE_TFT_INVON CONFIG_AVM_ILI934X_ENABLE_TFT_INVON
-
-#define RESET_IO_NUM CONFIG_AVM_DISPLAY_RESET_IO_NUM
-#define DC_IO_NUM CONFIG_AVM_DISPLAY_DC_IO_NUM
-
-#define SPI_CLOCK_HZ CONFIG_AVM_DISPLAY_SPI_CLOCK_HZ
+#define SPI_CLOCK_HZ 27000000
 #define SPI_MODE 0
 
 #define CHAR_WIDTH 8
@@ -123,6 +117,11 @@ static void send_message(term pid, term message, GlobalContext *global);
 struct SPI
 {
     struct SPIDisplay spi_disp;
+    int dc_gpio;
+    int reset_gpio;
+
+    avm_int_t rotation;
+
     Context *ctx;
 };
 
@@ -221,11 +220,8 @@ static xQueueHandle display_messages_queue;
 
 static NativeHandlerResult display_driver_consume_mailbox(Context *ctx);
 static void display_init(Context *ctx, term opts);
-#if ENABLE_ILI93442C == true
 static void display_init42c(struct SPI *spi);
-#else
 static void display_init41(struct SPI *spi);
-#endif
 
 static inline void writedata(struct SPI *spi, uint32_t data)
 {
@@ -236,9 +232,9 @@ static inline void writedata(struct SPI *spi, uint32_t data)
 
 static inline void writecommand(struct SPI *spi, uint8_t command)
 {
-    gpio_set_level(DC_IO_NUM, 0);
+    gpio_set_level(spi->dc_gpio, 0);
     writedata(spi, command);
-    gpio_set_level(DC_IO_NUM, 1);
+    gpio_set_level(spi->dc_gpio, 1);
 }
 
 static inline void set_screen_paint_area(struct SPI *spi, int x, int y, int width, int height)
@@ -768,27 +764,54 @@ static void display_init(Context *ctx, term opts)
     spi_display_parse_config(&spi_config, opts, ctx->global);
     spi_display_init(&spi->spi_disp, &spi_config);
 
+    bool ok = display_common_gpio_from_opts(opts, ATOM_STR("\x2", "dc"), &spi->dc_gpio, ctx->global);
+    ok = ok && display_common_gpio_from_opts(opts, ATOM_STR("\x5", "reset"), &spi->reset_gpio, ctx->global);
+
+    term compat_value_term = interop_kv_get_value_default(opts, ATOM_STR("\xA", "compatible"), term_nil(), ctx->global);
+    int str_ok;
+    char *compat_string = interop_term_to_string(compat_value_term, &str_ok);
+    bool enable_ili93442c = false;
+    if (str_ok && compat_string) {
+        enable_ili93442c = !strcmp(compat_string, "ilitek,ili9342c");
+        free(compat_string);
+    } else {
+        ok = false;
+    }
+
+    term rotation = interop_kv_get_value_default(opts, ATOM_STR("\x8", "rotation"), term_from_int(0), ctx->global);
+    ok = ok && term_is_integer(rotation);
+    spi->rotation = term_to_int(rotation);
+
+    term invon = interop_kv_get_value_default(opts, ATOM_STR("\x10", "enable_tft_invon"), FALSE_ATOM, ctx->global);
+    ok = ok && ((invon == TRUE_ATOM) || (invon == FALSE_ATOM));
+    bool enable_tft_invon = (invon == TRUE_ATOM);
+
+    if (!ok) {
+        // TODO: print error message
+        return;
+    }
+
     // Reset
     spi_device_acquire_bus(spi->spi_disp.handle, portMAX_DELAY);
-    gpio_set_direction(RESET_IO_NUM, GPIO_MODE_OUTPUT);
-    gpio_set_level(RESET_IO_NUM, 1);
+    gpio_set_direction(spi->reset_gpio, GPIO_MODE_OUTPUT);
+    gpio_set_level(spi->reset_gpio, 1);
     vTaskDelay(50 / portTICK_PERIOD_MS);
-    gpio_set_level(RESET_IO_NUM, 0);
+    gpio_set_level(spi->reset_gpio, 0);
     vTaskDelay(50 / portTICK_PERIOD_MS);
-    gpio_set_level(RESET_IO_NUM, 1);
+    gpio_set_level(spi->reset_gpio, 1);
     spi_device_release_bus(spi->spi_disp.handle);
 
-    gpio_set_direction(DC_IO_NUM, GPIO_MODE_OUTPUT);
+    gpio_set_direction(spi->dc_gpio, GPIO_MODE_OUTPUT);
 
     writecommand(spi, TFT_SWRST);
 
     vTaskDelay(5 / portTICK_PERIOD_MS);
 
-#if ENABLE_ILI93442C == true
-    display_init42c(spi);
-#else
-    display_init41(spi);
-#endif
+    if (enable_ili93442c) {
+        display_init42c(spi);
+    } else {
+        display_init41(spi);
+    }
 
     writecommand(spi, ILI9341_SLPOUT);
 
@@ -796,11 +819,11 @@ static void display_init(Context *ctx, term opts)
 
     writecommand(spi, ILI9341_DISPON);
 
-#if ENABLE_TFT_INVON == true
-    writecommand(spi, TFT_INVON);
-#endif
+    if (enable_tft_invon) {
+        writecommand(spi, TFT_INVON);
+    }
 
-    set_rotation(spi, 0);
+    set_rotation(spi, spi->rotation);
 
     struct BacklightGPIOConfig backlight_config;
     backlight_gpio_init_config(&backlight_config);
@@ -810,7 +833,6 @@ static void display_init(Context *ctx, term opts)
     xTaskCreate(process_messages, "display", 10000, spi, 1, NULL);
 }
 
-#if ENABLE_ILI93442C == false
 static void display_init41(struct SPI *spi)
 {
     writecommand(spi, 0xEF);
@@ -916,9 +938,7 @@ static void display_init41(struct SPI *spi)
     writedata(spi, 0x36);
     writedata(spi, 0x0F);
 }
-#endif
 
-#if ENABLE_ILI93442C == true
 static void display_init42c(struct SPI *spi)
 {
     writecommand(spi, 0xC8);
@@ -986,4 +1006,3 @@ static void display_init42c(struct SPI *spi)
     writedata(spi, 0x33);
     writedata(spi, 0x0F);
 }
-#endif

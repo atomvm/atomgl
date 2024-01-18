@@ -31,7 +31,7 @@ Context *memory_lcd_display_create_port(GlobalContext *global, term opts);
 
 Context *display_create_port(GlobalContext *global, term opts)
 {
-    int compat_atom_index = globalcontext_insert_atom(global, ATOM_STR("\x6", "compat"));
+    int compat_atom_index = globalcontext_insert_atom(global, ATOM_STR("\xA", "compatible"));
     term compat_atom = term_from_atom_index(compat_atom_index);
 
     term compat_value_term = interop_proplist_get_value(opts, compat_atom);
@@ -51,7 +51,9 @@ Context *display_create_port(GlobalContext *global, term opts)
         ctx = acep_5in65_7c_display_driver_create_port(global, opts);
     } else if (!strcmp(compat_string, "sharp_memory_lcd")) {
         ctx = memory_lcd_display_create_port(global, opts);
-    } else if (!strcmp(compat_string, "ili934x")) {
+    } else if (!strcmp(compat_string, "ilitek,ili9341")) {
+        ctx = ili934x_display_create_port(global, opts);
+    } else if (!strcmp(compat_string, "ilitek,ili9342c")) {
         ctx = ili934x_display_create_port(global, opts);
     }
 
