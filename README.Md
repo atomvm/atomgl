@@ -12,7 +12,9 @@ AtomGL is a display driver for a number of different display models and technolo
 
 * ILI9341 / ILI9342c: 240x320, 16 bit colors, supported
 * Waveshare 7-color 5.65" ACeP display module: 600x480, 7 colors with software dithering, WIP
-* Sharp Memory LCDs: 400x240 1-bit monochromatic, WIP
+* Sharp Memory LCDs: 400x240 1-bit monochromatic
+
+[SDL Linux display](sdl_display/) is also supported and can be built as AtomVM plugin.
 
 ## Notes
 
