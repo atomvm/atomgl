@@ -40,11 +40,8 @@
 
 #define ENABLE_INIT_SPI_BUS CONFIG_AVM_DISPLAY_INIT_SPI_BUS
 
-#define DISPLAY_BUSY 23
-#define RESET_IO_NUM CONFIG_AVM_DISPLAY_RESET_IO_NUM
-#define DISPLAY_DC CONFIG_AVM_DISPLAY_DC_IO_NUM
-
 #include "display_items.h"
+#include "display_common.h"
 #include "font.c"
 #include "spi_display.h"
 
@@ -59,6 +56,11 @@ static void send_message(term pid, term message, GlobalContext *global);
 struct SPI
 {
     struct SPIDisplay spi_disp;
+
+    int busy_gpio;
+    int dc_gpio;
+    int reset_gpio;
+
     Context *ctx;
 };
 
@@ -125,28 +127,28 @@ static uint8_t dither_acep7(int x, int y, uint8_t r, uint8_t g, uint8_t b)
     return min_index;
 }
 
-static void writecommand(struct SPIDisplay *spi_disp, uint8_t cmd)
+static void writecommand(struct SPI *spi, uint8_t cmd)
 {
-    gpio_set_level(DISPLAY_DC, 0);
-    spi_display_write(spi_disp, 8, cmd);
+    gpio_set_level(spi->dc_gpio, 0);
+    spi_display_write(&spi->spi_disp, 8, cmd);
 }
 
-static void writedata(struct SPIDisplay *spi_disp, uint8_t data)
+static void writedata(struct SPI *spi, uint8_t data)
 {
-    gpio_set_level(DISPLAY_DC, 1);
-    spi_display_write(spi_disp, 8, data);
+    gpio_set_level(spi->dc_gpio, 1);
+    spi_display_write(&spi->spi_disp, 8, data);
 }
 
-static void display_reset()
+static void display_reset(struct SPI *spi)
 {
-    gpio_set_level(RESET_IO_NUM, 0);
+    gpio_set_level(spi->reset_gpio, 0);
     vTaskDelay(100);
-    gpio_set_level(RESET_IO_NUM, 1);
+    gpio_set_level(spi->reset_gpio, 1);
 }
 
-static void wait_busy_level(int level)
+static void wait_busy_level(struct SPI *spi, int level)
 {
-    while (gpio_get_level(DISPLAY_BUSY) != level) {
+    while (gpio_get_level(spi->busy_gpio) != level) {
         vTaskDelay(100);
     }
 }
@@ -336,16 +338,16 @@ static void do_update(Context *ctx, term display_list)
     spi_device_acquire_bus(spi_disp->handle, portMAX_DELAY);
 
     // resolution command
-    writecommand(spi_disp, 0x61);
-    writedata(spi_disp, 0x02);
-    writedata(spi_disp, 0x58);
-    writedata(spi_disp, 0x01);
-    writedata(spi_disp, 0xC0);
+    writecommand(spi, 0x61);
+    writedata(spi, 0x02);
+    writedata(spi, 0x58);
+    writedata(spi, 0x01);
+    writedata(spi, 0xC0);
 
     // update command
-    writecommand(spi_disp, 0x10);
+    writecommand(spi, 0x10);
 
-    gpio_set_level(DISPLAY_DC, 1);
+    gpio_set_level(spi->dc_gpio, 1);
 
     uint8_t *buf = heap_caps_malloc(DISPLAY_WIDTH / 2, MALLOC_CAP_DMA);
     memset(buf, 0, DISPLAY_WIDTH / 2);
@@ -376,17 +378,17 @@ static void do_update(Context *ctx, term display_list)
     // not sure if we should add 0x11, which is end of data command or not
 
     // power on command
-    writecommand(spi_disp, 0x04);
-    wait_busy_level(1);
+    writecommand(spi, 0x04);
+    wait_busy_level(spi, 1);
 
     // refresh command
-    writecommand(spi_disp, 0x12);
-    wait_busy_level(1);
+    writecommand(spi, 0x12);
+    wait_busy_level(spi, 1);
 
     // power off command
-    writecommand(spi_disp, 0x02);
+    writecommand(spi, 0x02);
     spi_device_release_bus(spi_disp->handle);
-    wait_busy_level(0);
+    wait_busy_level(spi, 0);
 
     destroy_items(items, len);
 }
@@ -458,14 +460,14 @@ static void clear_screen(Context *ctx, int color)
 
     struct SPIDisplay *spi_disp = &spi->spi_disp;
     spi_device_acquire_bus(spi_disp->handle, portMAX_DELAY);
-    writecommand(spi_disp, 0x61);
-    writedata(spi_disp, 0x02);
-    writedata(spi_disp, 0x58);
-    writedata(spi_disp, 0x01);
-    writedata(spi_disp, 0xC0);
-    writecommand(spi_disp, 0x10);
+    writecommand(spi, 0x61);
+    writedata(spi, 0x02);
+    writedata(spi, 0x58);
+    writedata(spi, 0x01);
+    writedata(spi, 0xC0);
+    writecommand(spi, 0x10);
 
-    gpio_set_level(DISPLAY_DC, 1);
+    gpio_set_level(spi->dc_gpio, 1);
 
     bool transaction_in_progress = false;
 
@@ -485,13 +487,13 @@ static void clear_screen(Context *ctx, int color)
         spi_device_get_trans_result(spi->spi_disp.handle, &trans, portMAX_DELAY);
     }
 
-    writecommand(spi_disp, 0x04);
-    wait_busy_level(1);
-    writecommand(spi_disp, 0x12);
-    wait_busy_level(1);
-    writecommand(spi_disp, 0x02);
+    writecommand(spi, 0x04);
+    wait_busy_level(spi, 1);
+    writecommand(spi, 0x12);
+    wait_busy_level(spi, 1);
+    writecommand(spi, 0x02);
     spi_device_release_bus(spi_disp->handle);
-    wait_busy_level(0);
+    wait_busy_level(spi, 0);
 }
 #endif
 
@@ -510,57 +512,60 @@ static void display_spi_init(Context *ctx, term opts)
     spi_display_parse_config(&spi_config, opts, ctx->global);
     spi_display_init(&spi->spi_disp, &spi_config);
 
-    gpio_set_direction(19, GPIO_MODE_OUTPUT);
-    gpio_set_level(19, 1);
-    gpio_set_direction(DISPLAY_DC, GPIO_MODE_OUTPUT);
-    gpio_set_pull_mode(DISPLAY_DC, GPIO_PULLUP_ENABLE);
-    gpio_set_direction(DISPLAY_BUSY, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(DISPLAY_BUSY, GPIO_PULLUP_ENABLE);
-    gpio_set_level(DISPLAY_DC, 0);
+    bool ok = display_common_gpio_from_opts(opts, ATOM_STR("\x4", "busy"), &spi->busy_gpio, ctx->global);
+    ok = ok && display_common_gpio_from_opts(opts, ATOM_STR("\x2", "dc"), &spi->dc_gpio, ctx->global);
+    ok = ok && display_common_gpio_from_opts(opts, ATOM_STR("\x5", "reset"), &spi->reset_gpio, ctx->global);
+
+    gpio_set_direction(spi->reset_gpio, GPIO_MODE_OUTPUT);
+    gpio_set_level(spi->reset_gpio, 1);
+    gpio_set_direction(spi->dc_gpio, GPIO_MODE_OUTPUT);
+    gpio_set_pull_mode(spi->dc_gpio, GPIO_PULLUP_ENABLE);
+    gpio_set_direction(spi->busy_gpio, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(spi->busy_gpio, GPIO_PULLUP_ENABLE);
+    gpio_set_level(spi->dc_gpio, 0);
 
     esp_err_t ret = spi_device_acquire_bus(spi->spi_disp.handle, portMAX_DELAY);
     ESP_ERROR_CHECK(ret);
-    display_reset();
+    display_reset(spi);
 
-    wait_busy_level(1);
+    wait_busy_level(spi, 1);
 
-    struct SPIDisplay *spi_disp = &spi->spi_disp;
-    writecommand(spi_disp, 0x00);
-    writedata(spi_disp, 0xEF);
-    writedata(spi_disp, 0x08);
-    writecommand(spi_disp, 0x01);
-    writedata(spi_disp, 0x37);
-    writedata(spi_disp, 0x00);
-    writedata(spi_disp, 0x23);
-    writedata(spi_disp, 0x23);
-    writecommand(spi_disp, 0x03);
-    writedata(spi_disp, 0x00);
-    writecommand(spi_disp, 0x06);
-    writedata(spi_disp, 0xC7);
-    writedata(spi_disp, 0xC7);
-    writedata(spi_disp, 0x1D);
-    writecommand(spi_disp, 0x30);
-    writedata(spi_disp, 0x3C);
-    writecommand(spi_disp, 0x40);
-    writedata(spi_disp, 0x00);
-    writecommand(spi_disp, 0x50);
-    writedata(spi_disp, 0x3F);
-    writecommand(spi_disp, 0x60);
-    writedata(spi_disp, 0x22);
-    writecommand(spi_disp, 0x61);
-    writedata(spi_disp, 0x02);
-    writedata(spi_disp, 0x58);
-    writedata(spi_disp, 0x01);
-    writedata(spi_disp, 0xC0);
-    writecommand(spi_disp, 0xE3);
-    writedata(spi_disp, 0xAA);
-    writecommand(spi_disp, 0x82);
-    writedata(spi_disp, 0x80);
+    writecommand(spi, 0x00);
+    writedata(spi, 0xEF);
+    writedata(spi, 0x08);
+    writecommand(spi, 0x01);
+    writedata(spi, 0x37);
+    writedata(spi, 0x00);
+    writedata(spi, 0x23);
+    writedata(spi, 0x23);
+    writecommand(spi, 0x03);
+    writedata(spi, 0x00);
+    writecommand(spi, 0x06);
+    writedata(spi, 0xC7);
+    writedata(spi, 0xC7);
+    writedata(spi, 0x1D);
+    writecommand(spi, 0x30);
+    writedata(spi, 0x3C);
+    writecommand(spi, 0x40);
+    writedata(spi, 0x00);
+    writecommand(spi, 0x50);
+    writedata(spi, 0x3F);
+    writecommand(spi, 0x60);
+    writedata(spi, 0x22);
+    writecommand(spi, 0x61);
+    writedata(spi, 0x02);
+    writedata(spi, 0x58);
+    writedata(spi, 0x01);
+    writedata(spi, 0xC0);
+    writecommand(spi, 0xE3);
+    writedata(spi, 0xAA);
+    writecommand(spi, 0x82);
+    writedata(spi, 0x80);
 
     vTaskDelay(10);
 
-    writecommand(spi_disp, 0x50);
-    writedata(spi_disp, 0x37);
+    writecommand(spi, 0x50);
+    writedata(spi, 0x37);
     spi_device_release_bus(spi->spi_disp.handle);
 
     ctx->platform_data = spi;
