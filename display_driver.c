@@ -47,9 +47,9 @@ Context *display_create_port(GlobalContext *global, term opts)
     }
 
     Context *ctx = NULL;
-    if (!strcmp(compat_string, "acep_5in65_7c")) {
+    if (!strcmp(compat_string, "waveshare,5in65-acep-7c")) {
         ctx = acep_5in65_7c_display_driver_create_port(global, opts);
-    } else if (!strcmp(compat_string, "sharp_memory_lcd")) {
+    } else if (!strcmp(compat_string, "sharp,memory-lcd")) {
         ctx = memory_lcd_display_create_port(global, opts);
     } else if (!strcmp(compat_string, "ilitek,ili9341")) {
         ctx = ili934x_display_create_port(global, opts);

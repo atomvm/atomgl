@@ -21,7 +21,7 @@
 idf_component_register(SRCS
     "display_common.c"
     "display_driver.c"
-    "acep_5in65_7c.c"
+    "5in65_acep_7c_display_driver.c"
     "ili934x_display_driver.c"
     "memory_display_driver.c"
     "spi_display.c"
