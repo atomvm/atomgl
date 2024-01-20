@@ -27,6 +27,7 @@
 
 #include <driver/gpio.h>
 #include <driver/spi_master.h>
+#include <esp_log.h>
 #include <esp_heap_caps.h>
 
 #include <atom.h>
@@ -105,6 +106,8 @@
 #define TFT_INVON 0x21
 
 #include "font.c"
+
+static const char *TAG = "ili934x_display_driver";
 
 static inline term context_make_atom(Context *ctx, AtomString string)
 {
@@ -781,8 +784,8 @@ static void display_init(Context *ctx, term opts)
     ok = ok && ((invon == TRUE_ATOM) || (invon == FALSE_ATOM));
     bool enable_tft_invon = (invon == TRUE_ATOM);
 
-    if (!ok) {
-        // TODO: print error message
+    if (UNLIKELY(!ok)) {
+        ESP_LOGE(TAG, "Failed init: invalid display parameters.");
         return;
     }
 

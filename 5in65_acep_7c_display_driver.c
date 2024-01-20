@@ -49,6 +49,8 @@
 #define CHECK_OVERFLOW 1
 #define SELF_TEST 0
 
+static const char *TAG = "5in65_acep_7c_display_driver";
+
 static void send_message(term pid, term message, GlobalContext *global);
 
 struct SPI
@@ -509,6 +511,10 @@ static void display_spi_init(Context *ctx, term opts)
     bool ok = display_common_gpio_from_opts(opts, ATOM_STR("\x4", "busy"), &spi->busy_gpio, ctx->global);
     ok = ok && display_common_gpio_from_opts(opts, ATOM_STR("\x2", "dc"), &spi->dc_gpio, ctx->global);
     ok = ok && display_common_gpio_from_opts(opts, ATOM_STR("\x5", "reset"), &spi->reset_gpio, ctx->global);
+    if (UNLIKELY(!ok)) {
+        ESP_LOGE(TAG, "Failed init: invalid display GPIOs.");
+        return;
+    }
 
     gpio_set_direction(spi->reset_gpio, GPIO_MODE_OUTPUT);
     gpio_set_level(spi->reset_gpio, 1);
