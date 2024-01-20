@@ -38,8 +38,6 @@
 #define DISPLAY_WIDTH 600
 #define DISPLAY_HEIGHT 448
 
-#define ENABLE_INIT_SPI_BUS CONFIG_AVM_DISPLAY_INIT_SPI_BUS
-
 #include "display_items.h"
 #include "display_common.h"
 #include "font.c"
@@ -501,10 +499,6 @@ static void display_spi_init(Context *ctx, term opts)
 {
     struct SPI *spi = malloc(sizeof(struct SPI));
     // TODO check here
-
-#if ENABLE_INIT_SPI_BUS == true
-    spi_display_bus_init();
-#endif
 
     struct SPIDisplayConfig spi_config;
     spi_display_init_config(&spi_config);

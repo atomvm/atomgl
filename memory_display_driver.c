@@ -60,8 +60,6 @@
 #define CHECK_OVERFLOW 1
 #define REPORT_UNEXPECTED_MSGS 0
 
-#define ENABLE_INIT_SPI_BUS CONFIG_AVM_DISPLAY_INIT_SPI_BUS
-
 #include "font.c"
 
 struct SPI
@@ -455,10 +453,6 @@ static void send_message(term pid, term message, GlobalContext *global)
 
 static void display_init(Context *ctx, term opts)
 {
-#if ENABLE_INIT_SPI_BUS == true
-    spi_display_bus_init();
-#endif
-
     screen = malloc(sizeof(struct Screen));
     // FIXME: hardcoded width and height
     screen->w = 400;
