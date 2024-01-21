@@ -691,11 +691,8 @@ static void display_spi_init(Context *ctx, term opts)
     update_last_refresh_ts(ctx);
     spi->count_to_refresh = 0;
 
-    display_messages_queue = xQueueCreate(32, sizeof(Message *));
-    xTaskCreate(process_messages, "display", 10000, spi, 1, NULL);
-
 #if SELF_TEST
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < 8; i++) {
         fprintf(stderr, "color: %i\n", i);
         clear_screen(ctx, i);
         vTaskDelay(30000 / portTICK_PERIOD_MS);
@@ -704,6 +701,9 @@ static void display_spi_init(Context *ctx, term opts)
 
     while (1)
         ;
+#else
+    display_messages_queue = xQueueCreate(32, sizeof(Message *));
+    xTaskCreate(process_messages, "display", 10000, spi, 1, NULL);
 #endif
 }
 
