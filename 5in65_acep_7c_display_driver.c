@@ -27,6 +27,8 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include <sys/time.h>
+
 #include <defaultatoms.h>
 #include <interop.h>
 #include <mailbox.h>
@@ -52,6 +54,7 @@
 static const char *TAG = "5in65_acep_7c_display_driver";
 
 static void send_message(term pid, term message, GlobalContext *global);
+static void clear_screen(Context *ctx, int color);
 
 struct SPI
 {
@@ -62,6 +65,9 @@ struct SPI
     int reset_gpio;
 
     Context *ctx;
+
+    int count_to_refresh;
+    uint64_t last_refresh;
 };
 
 struct PendingReply
@@ -384,8 +390,50 @@ static int draw_text_x(uint8_t *line_buf, int xpos, int ypos, int max_line_len, 
     return drawn_pixels;
 }
 
+void wait_some_time(Context *ctx)
+{
+    struct SPI *spi = ctx->platform_data;
+
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    uint64_t now = tv.tv_sec * 1000LL + (tv.tv_usec / 1000LL);
+    uint64_t delta = now - spi->last_refresh;
+    if (delta < 2000) {
+        // Wait 2 seconds before allowing a new refresh
+        // this is not on datasheets, but without this the screen will not update.
+        vTaskDelay((2000 - delta) / portTICK_PERIOD_MS);
+    }
+}
+
+void update_last_refresh_ts(Context *ctx)
+{
+    struct SPI *spi = ctx->platform_data;
+
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    spi->last_refresh = tv.tv_sec * 1000LL + (tv.tv_usec / 1000LL);
+}
+
+void maybe_refresh(Context *ctx)
+{
+    struct SPI *spi = ctx->platform_data;
+
+    spi->count_to_refresh--;
+    if (spi->count_to_refresh <= 0) {
+        // 7 is the special "clear screen color"
+        clear_screen(ctx, 7);
+        update_last_refresh_ts(ctx);
+        spi->count_to_refresh = 5;
+    }
+}
+
 static void do_update(Context *ctx, term display_list)
 {
+    maybe_refresh(ctx);
+    // it looks like we need to wait some time
+    // let's use 2 seconds
+    wait_some_time(ctx);
+
     int proper;
     int len = term_list_length(display_list, &proper);
 
@@ -417,7 +465,7 @@ static void do_update(Context *ctx, term display_list)
     gpio_set_level(spi->dc_gpio, 1);
 
     uint8_t *buf = heap_caps_malloc(DISPLAY_WIDTH / 2, MALLOC_CAP_DMA);
-    memset(buf, 0, DISPLAY_WIDTH / 2);
+    memset(buf, 0x11, DISPLAY_WIDTH / 2);
 
     bool transaction_in_progress = false;
 
@@ -458,6 +506,8 @@ static void do_update(Context *ctx, term display_list)
     wait_busy_level(spi, 0);
 
     destroy_items(items, len);
+
+    update_last_refresh_ts(ctx);
 }
 
 static void process_message(Message *message, Context *ctx)
@@ -518,7 +568,6 @@ static void send_message(term pid, term message, GlobalContext *global)
     globalcontext_send_message(global, local_process_id, message);
 }
 
-#if SELF_TEST
 static void clear_screen(Context *ctx, int color)
 {
     struct SPI *spi = ctx->platform_data;
@@ -544,6 +593,7 @@ static void clear_screen(Context *ctx, int color)
             spi_device_get_trans_result(spi->spi_disp.handle, &trans, portMAX_DELAY);
         }
 
+        // let's ensure a memset otherwise we might generate odd artifacts
         memset(buf, color | (color << 4), DISPLAY_WIDTH / 2);
         spi_display_dmawrite(spi_disp, DISPLAY_WIDTH / 2, buf);
         transaction_in_progress = true;
@@ -562,7 +612,6 @@ static void clear_screen(Context *ctx, int color)
     spi_device_release_bus(spi_disp->handle);
     wait_busy_level(spi, 0);
 }
-#endif
 
 static void display_spi_init(Context *ctx, term opts)
 {
@@ -638,6 +687,9 @@ static void display_spi_init(Context *ctx, term opts)
     ctx->platform_data = spi;
 
     spi->ctx = ctx;
+
+    update_last_refresh_ts(ctx);
+    spi->count_to_refresh = 0;
 
     display_messages_queue = xQueueCreate(32, sizeof(Message *));
     xTaskCreate(process_messages, "display", 10000, spi, 1, NULL);
