@@ -652,8 +652,8 @@ static void display_spi_init(Context *ctx, term opts)
     writecommand(spi, 0x01);
     writedata(spi, 0x37);
     writedata(spi, 0x00);
-    writedata(spi, 0x23);
-    writedata(spi, 0x23);
+    writedata(spi, 0x23); //datasheet says: 0x05
+    writedata(spi, 0x23); //datasheet says: 0x05
     writecommand(spi, 0x03);
     writedata(spi, 0x00);
     writecommand(spi, 0x06);
@@ -662,10 +662,10 @@ static void display_spi_init(Context *ctx, term opts)
     writedata(spi, 0x1D);
     writecommand(spi, 0x30);
     writedata(spi, 0x3C);
-    writecommand(spi, 0x40);
+    writecommand(spi, 0x40); //datasheet says: 0x41
     writedata(spi, 0x00);
     writecommand(spi, 0x50);
-    writedata(spi, 0x3F);
+    writedata(spi, 0x3F); //datasheet says: 0x37
     writecommand(spi, 0x60);
     writedata(spi, 0x22);
     writecommand(spi, 0x61);
