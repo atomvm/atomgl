@@ -74,6 +74,7 @@ enum primitive
 {
     Invalid = 0,
     Image,
+    ScaledCroppedImage,
     Rect,
     Text
 };
@@ -89,6 +90,13 @@ struct ImageData
     const char *pix;
 };
 
+struct ImageDataWithSize
+{
+    int width;
+    int height;
+    const char *pix;
+};
+
 struct BaseDisplayItem
 {
     enum primitive primitive;
@@ -100,8 +108,15 @@ struct BaseDisplayItem
     union
     {
         struct ImageData image_data;
+        struct ImageDataWithSize image_data_with_size;
         struct TextData text_data;
     } data;
+
+    //used just for scaled cropped image
+    int source_x;
+    int source_y;
+    int x_scale;
+    int y_scale;
 };
 
 typedef struct BaseDisplayItem BaseDisplayItem;
@@ -167,6 +182,11 @@ static bool cmp_display_item(BaseDisplayItem *a, BaseDisplayItem *b)
         case Text:
             return (a->data.text_data.fgcolor == b->data.text_data.fgcolor) &&
                 !strcmp(a->data.text_data.text, b->data.text_data.text);
+
+        case ScaledCroppedImage:
+            return (a->data.image_data.pix == b->data.image_data.pix) &&
+                (a->x_scale == b->x_scale) && (a->y_scale == b->y_scale) &&
+                (a->source_x == b->source_x) && (a->source_y == b->source_y);
 
         default: {
             return true;
@@ -323,6 +343,60 @@ static int draw_image_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *i
     return drawn_pixels;
 }
 
+static int draw_scaled_cropped_img_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *item)
+{
+    int x = item->x;
+    int y = item->y;
+
+    Uint32 bgcolor;
+    bool visible_bg;
+    if (item->brcolor != 0) {
+        bgcolor = uint32_color_to_surface(screen, item->brcolor);
+        visible_bg = true;
+    } else {
+        visible_bg = false;
+    }
+
+    int width = item->width;
+    const char *data = item->data.image_data_with_size.pix;
+
+    int drawn_pixels = 0;
+
+    int y_scale = item->y_scale;
+    int x_scale = item->x_scale;
+    int img_width = item->data.image_data_with_size.width;
+
+    int source_x = item->source_x;
+    int source_y = item->source_y;
+
+    uint32_t *pixels = ((uint32_t *) data) + (source_y + ((ypos - y) / y_scale)) * img_width + source_x + ((xpos - x) / x_scale);
+    Uint32 *pixmem32 = (Uint32 *) (((uint8_t *) screen->pixels) + screen->w * ypos * BPP + xpos * BPP);
+
+    if (source_x + (width / x_scale) > img_width) {
+        width = (img_width - source_x) * x_scale;
+    }
+
+    if (width > xpos - x + max_line_len) {
+        width = xpos - x + max_line_len;
+    }
+
+    for (int j = xpos - x; j < width; j++) {
+        uint32_t img_pixel = READ_32_UNALIGNED(pixels);
+        if ((*pixels >> 24) & 0xFF) {
+            Uint32 color = uint32_color_to_surface(screen, img_pixel);
+            pixmem32[drawn_pixels] = color;
+        } else if (visible_bg) {
+            pixmem32[drawn_pixels] = bgcolor;
+        } else {
+            return drawn_pixels;
+        }
+        drawn_pixels++;
+        pixels = ((uint32_t *) data) + (source_y + ((ypos - y) / y_scale)) * img_width + source_x + (j / x_scale);
+    }
+
+    return drawn_pixels;
+}
+
 static int draw_rect_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *item)
 {
     int x = item->x;
@@ -433,6 +507,10 @@ static int draw_x(int xpos, int ypos, BaseDisplayItem *items, int items_count)
                 drawn_pixels = draw_image_x(xpos, ypos, max_line_len, item);
                 break;
 
+            case ScaledCroppedImage:
+                drawn_pixels = draw_scaled_cropped_img_x(xpos, ypos, max_line_len, item);
+                break;
+
             case Rect:
                 drawn_pixels = draw_rect_x(xpos, ypos, max_line_len, item);
                 break;
@@ -487,6 +565,42 @@ static void init_item(BaseDisplayItem *item, term req, Context *ctx)
         item->width = term_to_int(term_get_tuple_element(img, 1));
         item->height = term_to_int(term_get_tuple_element(img, 2));
         item->data.image_data.pix = term_binary_data(term_get_tuple_element(img, 3));
+
+    } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x14", "scaled_cropped_image"))) {
+        item->primitive = ScaledCroppedImage;
+        item->x = term_to_int(term_get_tuple_element(req, 1));
+        item->y = term_to_int(term_get_tuple_element(req, 2));
+        item->width = term_to_int(term_get_tuple_element(req, 3));
+        item->height = term_to_int(term_get_tuple_element(req, 4));
+
+        term bgcolor = term_get_tuple_element(req, 5);
+        if (bgcolor == globalcontext_make_atom(ctx->global, "\xB"
+                                              "transparent")) {
+            item->brcolor = 0;
+        } else {
+            item->brcolor = ((uint32_t) term_to_int(bgcolor)) << 8 | 0xFF;
+        }
+
+        item->source_x = term_to_int(term_get_tuple_element(req, 6));
+        item->source_y = term_to_int(term_get_tuple_element(req, 7));
+        item->x_scale = term_to_int(term_get_tuple_element(req, 8));
+        item->y_scale = term_to_int(term_get_tuple_element(req, 9));
+
+        // 10th element is for opts, but right now no opts are supported
+
+        term img = term_get_tuple_element(req, 11);
+
+        term format = term_get_tuple_element(img, 0);
+        if (format != globalcontext_make_atom(ctx->global, "\x8"
+                                             "rgba8888")) {
+            fprintf(stderr, "unsupported image format: ");
+            term_display(stderr, format, ctx);
+            fprintf(stderr, "\n");
+            return;
+        }
+        item->data.image_data_with_size.width = term_to_int(term_get_tuple_element(img, 1));
+        item->data.image_data_with_size.height = term_to_int(term_get_tuple_element(img, 2));
+        item->data.image_data_with_size.pix = term_binary_data(term_get_tuple_element(img, 3));
 
     } else if (cmd == globalcontext_make_atom(ctx->global, "\x4"
                                              "rect")) {
