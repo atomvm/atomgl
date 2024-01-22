@@ -69,6 +69,7 @@ struct SPI
 };
 
 #include "display_items.h"
+#include "draw_common.h"
 
 // This struct is just for compatibility reasons with the SDL display driver
 // so it is possible to easily copy & paste code from there.

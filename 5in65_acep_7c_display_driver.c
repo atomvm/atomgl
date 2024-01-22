@@ -42,6 +42,7 @@
 
 #include "display_items.h"
 #include "display_common.h"
+#include "draw_common.h"
 #include "font.c"
 #include "spi_display.h"
 
