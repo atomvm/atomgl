@@ -157,38 +157,85 @@ static void init_item(BaseDisplayItem *item, term req, Context *ctx)
 
     } else if (cmd == context_make_atom(ctx, "\x4"
                                              "text")) {
-        item->primitive = Text;
         item->x = term_to_int(term_get_tuple_element(req, 1));
         item->y = term_to_int(term_get_tuple_element(req, 2));
-
-        item->data.text_data.fgcolor = term_to_int(term_get_tuple_element(req, 4)) << 8 | 0xFF;
+        uint32_t fgcolor = term_to_int(term_get_tuple_element(req, 4)) << 8 | 0xFF;
+        uint32_t brcolor;
         term bgcolor = term_get_tuple_element(req, 5);
-        if (bgcolor == context_make_atom(ctx, "\xB"
+        if (bgcolor == globalcontext_make_atom(ctx->global, "\xB"
                                               "transparent")) {
-            item->brcolor = 0;
+            brcolor = 0;
         } else {
-            item->brcolor = ((uint32_t) term_to_int(bgcolor)) << 8 | 0xFF;
+            brcolor = ((uint32_t) term_to_int(bgcolor)) << 8 | 0xFF;
         }
-
-        term font = term_get_tuple_element(req, 3);
-        if (font != context_make_atom(ctx, "\xB"
-                                           "default16px")) {
-            fprintf(stderr, "unsupported font: ");
-            term_display(stderr, font, ctx);
-            fprintf(stderr, "\n");
-            //return;
-        }
-
         term text_term = term_get_tuple_element(req, 6);
         int ok;
-        item->data.text_data.text = interop_term_to_string(text_term, &ok);
+        char *text = interop_term_to_string(text_term, &ok);
         if (!ok) {
             fprintf(stderr, "invalid text.\n");
             return;
         }
 
-        item->height = 16;
-        item->width = strlen(item->data.text_data.text) * 8;
+        term font = term_get_tuple_element(req, 3);
+
+        if (font == globalcontext_make_atom(ctx->global, "\xB" "default16px")) {
+            item->primitive = Text;
+            item->height = 16;
+            item->width = strlen(text) * 8;
+            item->brcolor = brcolor;
+            item->data.text_data.fgcolor = fgcolor;
+            item->data.text_data.text = text;
+
+        } else {
+#ifdef ENABLE_UFONT
+            AtomString handle_atom = globalcontext_atomstring_from_term(ctx->global, font);
+            char handle[255];
+            atom_string_to_c(handle_atom, handle, sizeof(handle));
+            EpdFont *loaded_font = ufont_manager_find_by_handle(ufont_manager, handle);
+
+            if (!loaded_font) {
+                fprintf(stderr, "unsupported font: ");
+                term_display(stderr, font, ctx);
+                fprintf(stderr, "\n");
+                return;
+            }
+
+            EpdFontProperties props = epd_font_properties_default();
+            EpdRect rect = epd_get_string_rect(loaded_font, text, 0, 0, 0, &props);
+
+            struct Surface surface;
+            surface.width = rect.width;
+            surface.height = rect.height;
+            surface.buffer = malloc(rect.width * rect.height * BPP);
+            memset(surface.buffer, 0, rect.width * rect.height * BPP);
+            int text_x = 0;
+            int text_y = loaded_font->ascender;
+            enum EpdDrawError res = epd_write_default(loaded_font, text, &text_x, &text_y, &surface);
+            free(text);
+            if (res != EPD_DRAW_SUCCESS) {
+                fprintf(stderr, "Failed to draw text. Error code: %i\n", res);
+                return;
+            }
+
+            item->primitive = Image;
+            item->width = surface.width;
+            item->height = surface.height;
+            item->brcolor = 0;
+            //FIXME: surface buffer leak
+            item->data.image_data.pix = surface.buffer;
+#else
+            fprintf(stderr, "unsupported font: ");
+            term_display(stderr, font, ctx);
+            fprintf(stderr, "\n");
+            item->primitive = Text;
+            item->height = 16;
+            item->width = strlen(text) * 8;
+            item->brcolor = brcolor;
+            item->data.text_data.fgcolor = fgcolor;
+            item->data.text_data.text = text;
+
+#endif
+        }
 
     } else {
         fprintf(stderr, "unexpected display list command: ");
