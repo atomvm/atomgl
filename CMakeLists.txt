@@ -24,6 +24,7 @@ idf_component_register(SRCS
     "5in65_acep_7c_display_driver.c"
     "ili934x_display_driver.c"
     "memory_display_driver.c"
+    "ssd1306_display_driver.c"
     "spi_display.c"
     "backlight_gpio.c"
     PRIV_REQUIRES "libatomvm" "avm_sys" "avm_builtins" "sdmmc" "vfs" "fatfs")
