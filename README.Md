@@ -72,3 +72,5 @@ Following primitives are supported:
 * scaled_cropped_image
 * rect
 * text
+
+See also [documentation](docs/primitives.md) for more information.
