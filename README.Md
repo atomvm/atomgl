@@ -27,7 +27,7 @@ software dithering
 
 1. Add this component to the ESP32 components directory
 2. Open a display port using the right options
-3. Start an avm_scene that will push updates to the display
+3. Start an [avm_scene](https://github.com/atomvm/avm_scene) that will push updates to the display
 
 ### Display Option Example
 
