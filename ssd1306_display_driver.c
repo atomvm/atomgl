@@ -118,7 +118,7 @@ static void do_update(Context *ctx, term display_list)
                 i2c_master_write_byte(cmd, out_buf[j], true);
             }
             i2c_master_stop(cmd);
-            i2c_master_cmd_begin(I2C_NUM_0, cmd, 10 / portTICK_PERIOD_MS);
+            i2c_master_cmd_begin(i2c_num, cmd, 10 / portTICK_PERIOD_MS);
             i2c_cmd_link_delete(cmd);
 
             memset(buf, 0, memsize);
