@@ -47,6 +47,7 @@
 #define CTRL_BYTE_CMD_STREAM 0x00
 #define CTRL_BYTE_DATA_STREAM 0x40
 
+#define CMD_DISPLAY_INVERTED 0xA7
 #define CMD_DISPLAY_ON 0xAF
 #define CMD_SET_SEGMENT_REMAP 0xA1
 #define CMD_SET_COM_SCAN_MODE 0xC8
@@ -103,7 +104,7 @@ static void do_update(Context *ctx, term display_list)
 
         uint8_t *out_buf = buf + (DISPLAY_WIDTH / 8);
         for (int i = 0; i < DISPLAY_WIDTH; i++) {
-            out_buf[i] |= ((~buf[i / 8] >> (i % 8)) & 1) << (ypos % 8);
+            out_buf[i] |= ((buf[i / 8] >> (i % 8)) & 1) << (ypos % 8);
         }
 
         if ((ypos % PAGE_HEIGHT) == (PAGE_HEIGHT - 1)) {
@@ -142,6 +143,8 @@ static void display_init(Context *ctx, term opts)
         return;
     }
 
+    bool invert = interop_kv_get_value(opts, ATOM_STR("\x6", "invert"), glb) == TRUE_ATOM;
+
     display_messages_queue = xQueueCreate(32, sizeof(Message *));
 
     struct SPI *spi = malloc(sizeof(struct SPI));
@@ -176,6 +179,10 @@ static void display_init(Context *ctx, term opts)
 
     i2c_master_write_byte(cmd, CMD_SET_SEGMENT_REMAP, true);
     i2c_master_write_byte(cmd, CMD_SET_COM_SCAN_MODE, true);
+
+    if (invert) {
+        i2c_master_write_byte(cmd, CMD_DISPLAY_INVERTED, true);
+    }
 
     i2c_master_write_byte(cmd, CMD_DISPLAY_ON, true);
     i2c_master_stop(cmd);
