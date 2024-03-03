@@ -1,7 +1,7 @@
 #
 # This file is part of AtomVM.
 #
-# Copyright 2022 Davide Bettio <davide@uninstall.it>
+# Copyright 2022-2024 Davide Bettio <davide@uninstall.it>
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,6 +18,14 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
+# WHOLE_ARCHIVE option is supported only with esp-idf 5.x
+# A link option will be used with esp-idf 4.x
+if (IDF_VERSION_MAJOR EQUAL 5)
+    set(OPTIONAL_WHOLE_ARCHIVE WHOLE_ARCHIVE)
+else()
+    set(OPTIONAL_WHOLE_ARCHIVE "")
+endif()
+
 idf_component_register(SRCS
     "display_common.c"
     "display_driver.c"
@@ -27,8 +35,12 @@ idf_component_register(SRCS
     "ssd1306_display_driver.c"
     "spi_display.c"
     "backlight_gpio.c"
-    PRIV_REQUIRES "libatomvm" "avm_sys" "avm_builtins" "sdmmc" "vfs" "fatfs")
+    PRIV_REQUIRES "libatomvm" "avm_sys" "avm_builtins" "sdmmc" "vfs" "fatfs"
+    ${OPTIONAL_WHOLE_ARCHIVE}
+)
 
-idf_build_set_property(LINK_OPTIONS
-"-Wl,--whole-archive ${CMAKE_CURRENT_BINARY_DIR}/lib${COMPONENT_NAME}.a -Wl,--no-whole-archive"
-APPEND)
+if (IDF_VERSION_MAJOR EQUAL 4)
+    idf_build_set_property(
+        LINK_OPTIONS "-Wl,--whole-archive ${CMAKE_CURRENT_BINARY_DIR}/lib${COMPONENT_NAME}.a -Wl,--no-whole-archive"
+        APPEND)
+endif()
