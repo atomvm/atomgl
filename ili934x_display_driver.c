@@ -133,7 +133,7 @@ struct Screen
     uint16_t *pixels_out;
 };
 
-struct Screen *screen;
+static struct Screen *screen;
 
 // This functions is taken from:
 // https://stackoverflow.com/questions/18937701/combining-two-16-bits-rgb-colors-with-alpha-blending

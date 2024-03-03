@@ -83,7 +83,7 @@ struct Screen
     // keep double buffer disabled for now: uint16_t *pixels_out;
 };
 
-struct Screen *screen;
+static struct Screen *screen;
 
 struct PendingReply
 {
