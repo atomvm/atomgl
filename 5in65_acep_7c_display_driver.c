@@ -77,7 +77,7 @@ struct PendingReply
     term pending_call_pid;
 };
 
-static xQueueHandle display_messages_queue;
+static QueueHandle_t display_messages_queue;
 
 static inline float square(float p)
 {
