@@ -37,7 +37,7 @@ jobs:
     - name: Checkout repo
       uses: actions/checkout@v4
       with:
-        path: './src/platforms/esp32/components/'
+        path: './src/platforms/esp32/components/atomgl/'
 
     - name: Build with idf.py
       shell: bash
