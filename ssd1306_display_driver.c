@@ -57,6 +57,7 @@
 struct SPI
 {
     term i2c_host;
+    bool is_sh1106;
     Context *ctx;
 };
 
@@ -112,12 +113,36 @@ static void do_update(Context *ctx, term display_list)
             cmd = i2c_cmd_link_create();
             i2c_master_start(cmd);
             i2c_master_write_byte(cmd, (I2C_ADDRESS << 1) | I2C_MASTER_WRITE, true);
+
             i2c_master_write_byte(cmd, CTRL_BYTE_CMD_SINGLE, true);
             i2c_master_write_byte(cmd, 0xB0 | ypos / 8, true);
+            if (spi->is_sh1106) {
+                // set the column, otherwise the starting column will be somewhere in the middle
+                i2c_master_write_byte(cmd, CTRL_BYTE_CMD_SINGLE, true);
+                i2c_master_write_byte(cmd, 0x00, true);
+                i2c_master_write_byte(cmd, CTRL_BYTE_CMD_SINGLE, true);
+                i2c_master_write_byte(cmd, 0x10, true);
+            }
             i2c_master_write_byte(cmd, CTRL_BYTE_DATA_STREAM, true);
+
+
+            if (spi->is_sh1106) {
+                // add 2 empty pages on sh1106 since it can have up to 132 pixels
+                // and 128 pixel screen starts at (2, 0)
+                i2c_master_write_byte(cmd, 0, true);
+                i2c_master_write_byte(cmd, 0, true);
+            }
+
             for (uint8_t j = 0; j < DISPLAY_WIDTH; j++) {
                 i2c_master_write_byte(cmd, out_buf[j], true);
             }
+
+            // no need to send the last 2 page, the position will be set on next line again
+            // if (spi->is_sh1106) {
+            //    i2c_master_write_byte(cmd, 0, true);
+            //    i2c_master_write_byte(cmd, 0, true);
+            // }
+
             i2c_master_stop(cmd);
             i2c_master_cmd_begin(i2c_num, cmd, 10 / portTICK_PERIOD_MS);
             i2c_cmd_link_delete(cmd);
@@ -151,6 +176,16 @@ static void display_init(Context *ctx, term opts)
     ctx->platform_data = spi;
 
     spi->ctx = ctx;
+
+    term compat_value_term = interop_kv_get_value_default(opts, ATOM_STR("\xA", "compatible"), term_nil(), ctx->global);
+    int str_ok;
+    char *compat_string = interop_term_to_string(compat_value_term, &str_ok);
+    if (str_ok && compat_string) {
+        spi->is_sh1106 = !strcmp(compat_string, "sino-wealth,sh1106");
+        free(compat_string);
+    } else {
+        return;
+    }
 
     int reset_gpio;
     if (!display_common_gpio_from_opts(opts, ATOM_STR("\x5", "reset"), &reset_gpio, glb)) {

@@ -20,6 +20,7 @@ pushing updates to it. For this reason no additional NIFs are provided.
 software dithering
 * `sharp,memory-lcd`: Sharp Memory LCDs: 400x240 1-bit monochromatic
 * `solomon-systech,ssd1306`: Solomon Systech SSD1306: 128x64 1-bit monochromatic
+* `sino-wealth,sh1106`: Sino Wealth SH1106: 128x64 1-bit monochromatic
 
 [SDL Linux display](sdl_display/) is also supported and can be built as AtomVM plugin.
 
