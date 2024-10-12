@@ -888,8 +888,8 @@ void *display_loop(void *args)
                 memset(&mouse_event, 0, sizeof(struct MouseEvent));
                 mouse_event.type = event.motion.type;
                 mouse_event.button = event.motion.state;
-                mouse_event.x = event.motion.x;
-                mouse_event.y = event.motion.y;
+                mouse_event.x = event.motion.x / scale;
+                mouse_event.y = event.motion.y / scale;
                 send_mouse_event(&mouse_event, the_ctx);
                 break;
             }
@@ -899,8 +899,8 @@ void *display_loop(void *args)
                 memset(&mouse_event, 0, sizeof(struct MouseEvent));
                 mouse_event.type = event.button.type;
                 mouse_event.button = event.button.button;
-                mouse_event.x = event.button.x;
-                mouse_event.y = event.button.y;
+                mouse_event.x = event.button.x / scale;
+                mouse_event.y = event.button.y / scale;
                 send_mouse_event(&mouse_event, the_ctx);
                 break;
             }
@@ -910,8 +910,8 @@ void *display_loop(void *args)
                 memset(&mouse_event, 0, sizeof(struct MouseEvent));
                 mouse_event.type = event.button.type;
                 mouse_event.button = event.button.button;
-                mouse_event.x = event.button.x;
-                mouse_event.y = event.button.y;
+                mouse_event.x = event.button.x / scale;
+                mouse_event.y = event.button.y / scale;
                 send_mouse_event(&mouse_event, the_ctx);
                 break;
             }
