@@ -35,7 +35,7 @@ idf_component_register(SRCS
     "ssd1306_display_driver.c"
     "spi_display.c"
     "backlight_gpio.c"
-    PRIV_REQUIRES "libatomvm" "avm_sys" "avm_builtins" "sdmmc" "vfs" "fatfs"
+    PRIV_REQUIRES "libatomvm" "avm_sys" "avm_builtins" "driver" "sdmmc" "vfs" "fatfs"
     ${OPTIONAL_WHOLE_ARCHIVE}
 )
 
