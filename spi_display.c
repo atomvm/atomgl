@@ -33,12 +33,6 @@
 
 #include "display_common.h"
 
-#define MISO_IO_NUM CONFIG_AVM_DISPLAY_MISO_IO_NUM
-#define MOSI_IO_NUM CONFIG_AVM_DISPLAY_MOSI_IO_NUM
-#define SCLK_IO_NUM CONFIG_AVM_DISPLAY_SCLK_IO_NUM
-
-#define SD_CS_IO_NUM CONFIG_AVM_DISPLAY_SD_CS_IO_NUM
-
 bool spi_display_dmawrite(struct SPIDisplay *spi_data, int data_len, const void *data)
 {
     memset(&spi_data->transaction, 0, sizeof(spi_transaction_t));
