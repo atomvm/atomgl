@@ -521,6 +521,14 @@ static void do_update(Context *ctx, term display_list)
     };
     clip_rectangle(&damaged, &screen_rect);
 
+    // BUG: damage area is not correct
+    // WORKAROUND: always damage the whole screen to force full redraw
+    damaged.x = 0;
+    damaged.y = 0;
+    damaged.height = screen->h;
+    damaged.width = screen->w;
+    // END OF WORKAROUND
+
     for (int ypos = damaged.y; ypos < damaged.y + damaged.height; ypos++) {
         int xpos = damaged.x;
         while (xpos < damaged.x + damaged.width) {
