@@ -51,6 +51,7 @@ struct DisplayOpts
 struct KeyboardEvent
 {
     uint16_t key;
+    uint16_t unicode;
     bool key_down;
 };
 
@@ -648,6 +649,11 @@ static void send_message(term pid, term message, GlobalContext *global)
     globalcontext_send_message(global, local_process_id, message);
 }
 
+static inline int replace_new_line(int c)
+{
+    return c == '\r' ? '\n' : c;
+}
+
 void send_keyboard_event(struct KeyboardEvent *keyb, Context *ctx)
 {
     GlobalContext *glb = ctx->global;
@@ -660,16 +666,64 @@ void send_keyboard_event(struct KeyboardEvent *keyb, Context *ctx)
 
         BEGIN_WITH_STACK_HEAP(TUPLE_SIZE(3) + TUPLE_SIZE(4), heap);
 
-        term up_down = keyb->key_down ? globalcontext_make_atom(glb, "\x4"
-                                                              "down")
-                                     : globalcontext_make_atom(glb, "\x2"
-                                                              "up");
+        term up_down = keyb->key_down ? globalcontext_make_atom(glb, ATOM_STR("\x4", "down"))
+                                      : globalcontext_make_atom(glb, ATOM_STR("\x2", "up"));
+        bool supress_key = false;
+        term code_or_special;
+        // unicode is valid only during key down
+        if (keyb->unicode) {
+            code_or_special = term_from_int(replace_new_line(keyb->unicode));
+        } else {
+            switch (keyb->key) {
+                case 274:
+                    code_or_special = globalcontext_make_atom(glb, ATOM_STR("\x4", "down"));
+                    break;
+                case 276:
+                    code_or_special = globalcontext_make_atom(glb, ATOM_STR("\x4", "left"));
+                    break;
+                case 273:
+                    code_or_special = globalcontext_make_atom(glb, ATOM_STR("\x2", "up"));
+                    break;
+                case 275:
+                    code_or_special = globalcontext_make_atom(glb, ATOM_STR("\x5", "right"));
+                    break;
+                case 301:
+                    code_or_special = globalcontext_make_atom(glb, ATOM_STR("\x9", "caps_lock"));
+                    break;
+                case 303:
+                    code_or_special = globalcontext_make_atom(glb, ATOM_STR("\xB", "right_shift"));
+                    break;
+                case 304:
+                    code_or_special = globalcontext_make_atom(glb, ATOM_STR("\x5", "shift"));
+                    break;
+                case 306:
+                    code_or_special = globalcontext_make_atom(glb, ATOM_STR("\x4", "ctrl"));
+                    break;
+                case 308:
+                    code_or_special = globalcontext_make_atom(glb, ATOM_STR("\x3", "alt"));
+                    break;
+                case 313:
+                    code_or_special = globalcontext_make_atom(glb, ATOM_STR("\x5", "altgr"));
+                    break;
+                default:
+                    if (keyb->key <= 127) {
+                        code_or_special = term_from_int(replace_new_line(keyb->key));
+                    } else {
+                        fprintf(stderr, "Ignoring key: %i\n", (int) keyb->key);
+                        supress_key = true;
+                    }
+            }
+        }
+
+        if (supress_key) {
+            return;
+        }
 
         term event_data_tuple = term_alloc_tuple(3, &heap);
         term_put_tuple_element(event_data_tuple, 0, globalcontext_make_atom(glb, "\x8"
                                                                            "keyboard"));
         term_put_tuple_element(event_data_tuple, 1, up_down);
-        term_put_tuple_element(event_data_tuple, 2, term_from_int(keyb->key));
+        term_put_tuple_element(event_data_tuple, 2, code_or_special);
 
         term event_tuple = term_alloc_tuple(4, &heap);
         term_put_tuple_element(event_tuple, 0, globalcontext_make_atom(glb, "\xB"
@@ -869,14 +923,10 @@ void *display_loop(void *args)
             }
 
             case SDL_KEYDOWN: {
-                if (event.key.keysym.unicode == 0) {
-                    continue;
-                } else if (event.key.keysym.unicode == '\r') {
-                    event.key.keysym.unicode = '\n';
-                }
                 struct KeyboardEvent keyb_event;
                 memset(&keyb_event, 0, sizeof(struct KeyboardEvent));
-                keyb_event.key = event.key.keysym.unicode;
+                keyb_event.key = event.key.keysym.sym;
+                keyb_event.unicode = event.key.keysym.unicode;
                 keyb_event.key_down = true;
                 send_keyboard_event(&keyb_event, the_ctx);
                 break;
@@ -886,6 +936,7 @@ void *display_loop(void *args)
                 struct KeyboardEvent keyb_event;
                 memset(&keyb_event, 0, sizeof(struct KeyboardEvent));
                 keyb_event.key = event.key.keysym.sym;
+                keyb_event.unicode = event.key.keysym.unicode;
                 keyb_event.key_down = false;
                 send_keyboard_event(&keyb_event, the_ctx);
                 break;
