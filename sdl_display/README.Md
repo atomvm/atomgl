@@ -1,3 +1,9 @@
+<!---
+  Copyright 2020-2024 Davide Bettio <davide@uninstall.it>
+
+  SPDX-License-Identifier: Apache-2.0
+-->
+
 # SDL Display Driver
 
 This display driver can be used for displaying graphics on a PC using SDL library.
