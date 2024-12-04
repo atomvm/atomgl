@@ -39,8 +39,9 @@
 #define DEPTH 32
 
 #define CHAR_WIDTH 8
-#include "../font.c"
 #include "../display_items.h"
+#include "../font.c"
+#include "../image_helpers.h"
 
 struct DisplayOpts
 {
@@ -589,6 +590,12 @@ static void process_message(Context *ctx)
         }
         // TODO: selective subscribe
         keyboard_pid = gen_message.pid;
+
+    } else if (cmd == globalcontext_make_atom(ctx->global, "\xA" "load_image")) {
+
+        handle_load_image(req, gen_message.ref, gen_message.pid, ctx);
+
+        goto free_msg_and_exit;
 
     } else if (cmd == globalcontext_make_atom(ctx->global, "\xD" "register_font")) {
         term font_bin = term_get_tuple_element(req, 2);

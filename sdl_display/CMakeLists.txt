@@ -43,7 +43,7 @@ endif()
 
 set(CMAKE_SHARED_LIBRARY_PREFIX "")
 
-add_library(avm_display_port_driver SHARED display.c ufontlib.c)
+add_library(avm_display_port_driver SHARED display.c ufontlib.c ../image_helpers.c ../spng.c)
 
 if (AVM_DISABLE_SMP)
     target_compile_definitions(avm_display_port_driver PUBLIC AVM_NO_SMP)
