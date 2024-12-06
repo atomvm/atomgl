@@ -36,9 +36,14 @@ idf_component_register(SRCS
     "st7789_display_driver.c"
     "spi_display.c"
     "backlight_gpio.c"
+    "image_helpers.c"
+    "spng.c"
+    "miniz.c"
     PRIV_REQUIRES "libatomvm" "avm_sys" "avm_builtins" "driver" "sdmmc" "vfs" "fatfs"
     ${OPTIONAL_WHOLE_ARCHIVE}
 )
+
+target_compile_definitions(${COMPONENT_TARGET} PRIVATE "-DSPNG_USE_MINIZ=1")
 
 if (IDF_VERSION_MAJOR EQUAL 4)
     idf_build_set_property(

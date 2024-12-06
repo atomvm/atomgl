@@ -51,6 +51,7 @@
 #include "backlight_gpio.h"
 #include "display_common.h"
 #include "display_items.h"
+#include "image_helpers.h"
 #include "spi_display.h"
 
 // if needed it can be lowered to 27000000, while maximum is 62.5 Mhz
@@ -572,6 +573,10 @@ static void process_message(Message *message, Context *ctx)
         draw_buffer(spi, x, y, width, height, data);
 
         // draw_buffer is a kind of cast, no need to reply
+        return;
+
+    } else if (cmd == globalcontext_make_atom(ctx->global, "\xA" "load_image")) {
+        handle_load_image(req, gen_message.ref, gen_message.pid, ctx);
         return;
 
     } else {

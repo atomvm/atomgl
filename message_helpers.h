@@ -45,6 +45,8 @@
 
 #include <math.h>
 
+#include "image_helpers.h"
+
 struct PendingReply
 {
     uint64_t pending_call_ref_ticks;
@@ -75,6 +77,10 @@ static void process_message(Message *message, Context *ctx)
                                       "update")) {
         term display_list = term_get_tuple_element(req, 1);
         do_update(ctx, display_list);
+
+    } else if (cmd == globalcontext_make_atom(ctx->global, "\xA" "load_image")) {
+        handle_load_image(req, gen_message.ref, gen_message.pid, ctx);
+        return;
 
     } else {
 #if REPORT_UNEXPECTED_MSGS

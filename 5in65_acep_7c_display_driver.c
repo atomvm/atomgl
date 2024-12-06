@@ -44,6 +44,7 @@
 #include "display_common.h"
 #include "draw_common.h"
 #include "font.c"
+#include "image_helpers.h"
 #include "spi_display.h"
 
 #define CHAR_WIDTH 8
@@ -530,6 +531,10 @@ static void process_message(Message *message, Context *ctx)
 
         term display_list = term_get_tuple_element(req, 1);
         do_update(ctx, display_list);
+
+    } else if (cmd == globalcontext_make_atom(ctx->global, "\xA" "load_image")) {
+        handle_load_image(req, gen_message.ref, gen_message.pid, ctx);
+        return;
 
     } else {
 #if REPORT_UNEXPECTED_MSGS

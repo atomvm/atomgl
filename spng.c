@@ -16,7 +16,7 @@
     #include "tests/framac_stubs.h"
 #else
     #ifdef SPNG_USE_MINIZ
-        #include <miniz.h>
+        #include "miniz.h"
     #else
         #include <zlib.h>
     #endif
