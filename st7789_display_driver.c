@@ -389,7 +389,7 @@ static int draw_text_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *it
 
 static int find_max_line_len(BaseDisplayItem *items, int count, int xpos, int ypos)
 {
-    int line_len = screen->w;
+    int line_len = screen->w - xpos;
 
     for (int i = 0; i < count; i++) {
         BaseDisplayItem *item = &items[i];
