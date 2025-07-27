@@ -643,10 +643,14 @@ static void send_message(term pid, term message, GlobalContext *global)
 
 static void display_init(Context *ctx, term opts)
 {
+    term width_term = interop_kv_get_value_default(
+        opts, ATOM_STR("\x5", "width"), term_from_int(320), ctx->global);
+    term height_term = interop_kv_get_value_default(
+        opts, ATOM_STR("\x6", "height"), term_from_int(240), ctx->global);
+
     screen = malloc(sizeof(struct Screen));
-    // FIXME: hardcoded width and height
-    screen->w = 320;
-    screen->h = 240;
+    screen->w = term_to_int(width_term);
+    screen->h = term_to_int(height_term);
     screen->pixels = heap_caps_malloc(screen->w * sizeof(uint16_t), MALLOC_CAP_DMA);
     screen->pixels_out = heap_caps_malloc(screen->w * sizeof(uint16_t), MALLOC_CAP_DMA);
 
