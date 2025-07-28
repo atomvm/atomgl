@@ -124,6 +124,8 @@ struct Screen
 {
     int w;
     int h;
+    avm_int_t x_offset;
+    avm_int_t y_offset;
     uint16_t *pixels;
     uint16_t *pixels_out;
 };
@@ -196,6 +198,9 @@ static inline void writecommand(struct SPI *spi, uint8_t command)
 
 static inline void set_screen_paint_area(struct SPI *spi, int x, int y, int width, int height)
 {
+    x += screen->x_offset;
+    y += screen->y_offset;
+
     writecommand(spi, ST7789_CASET);
     spi_device_acquire_bus(spi->spi_disp.handle, portMAX_DELAY);
     spi_display_write(&spi->spi_disp, 32, (x << 16) | ((x + width) - 1));
@@ -683,6 +688,18 @@ static void display_init(Context *ctx, term opts)
     term invon = interop_kv_get_value_default(opts, ATOM_STR("\x10", "enable_tft_invon"), FALSE_ATOM, ctx->global);
     ok = ok && ((invon == TRUE_ATOM) || (invon == FALSE_ATOM));
     bool enable_tft_invon = (invon == TRUE_ATOM);
+
+    term x_off_term = interop_kv_get_value_default(
+        opts, ATOM_STR("\x8", "x_offset"), term_from_int(0), ctx->global);
+    term y_off_term = interop_kv_get_value_default(
+        opts, ATOM_STR("\x8", "y_offset"), term_from_int(0), ctx->global);
+
+    if (term_is_integer(x_off_term) && term_is_integer(y_off_term)) {
+        screen->x_offset = term_to_int(x_off_term);
+        screen->y_offset = term_to_int(y_off_term);
+    } else {
+        ok = false;
+    }
 
     if (UNLIKELY(!ok)) {
         ESP_LOGE(TAG, "Failed init: invalid display parameters.");
