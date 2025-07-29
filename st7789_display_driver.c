@@ -181,6 +181,7 @@ static NativeHandlerResult display_driver_consume_mailbox(Context *ctx);
 static void display_init(Context *ctx, term opts);
 static void display_init_alt_gamma_2(struct SPI *spi);
 static void display_init_std(struct SPI *spi);
+static void display_init_using_list(struct SPI *spi, term init_list);
 
 static inline void writedata(struct SPI *spi, uint32_t data)
 {
@@ -725,14 +726,20 @@ static void display_init(Context *ctx, term opts)
         delay(100);
     }
 
-    term init_seq_type_term = interop_kv_get_value_default(opts, ATOM_STR("\xD", "init_seq_type"), term_nil(), ctx->global);
-    int str_ok;
-    char *init_seq_type_string = interop_term_to_string(init_seq_type_term, &str_ok);
-    if (str_ok && !strcmp(init_seq_type_string, "alt_gamma_2")) {
-        display_init_alt_gamma_2(spi);
-        free(init_seq_type_string);
+    term maybe_init_list
+        = interop_kv_get_value_default(opts, ATOM_STR("\x9", "init_list"), term_nil(), ctx->global);
+    if (maybe_init_list != term_nil()) {
+        display_init_using_list(spi, maybe_init_list);
     } else {
-        display_init_std(spi);
+        term init_seq_type_term = interop_kv_get_value_default(opts, ATOM_STR("\xD", "init_seq_type"), term_nil(), ctx->global);
+        int str_ok;
+        char *init_seq_type_string = interop_term_to_string(init_seq_type_term, &str_ok);
+        if (str_ok && !strcmp(init_seq_type_string, "alt_gamma_2")) {
+            display_init_alt_gamma_2(spi);
+            free(init_seq_type_string);
+        } else {
+            display_init_std(spi);
+        }
     }
 
     set_rotation(spi, spi->rotation);
@@ -949,4 +956,43 @@ static void display_init_std(struct SPI *spi)
     writedata(spi, 0x00);
     writedata(spi, 0x01);
     writedata(spi, 0x3F); // 319
+}
+
+static void writecmddata(struct SPI *spi, uint8_t cmd, const uint8_t *data, size_t length)
+{
+    writecommand(spi, cmd);
+    for (int i = 0; i < length; i++) {
+        writedata(spi, data[i]);
+    }
+}
+
+static void display_init_using_list(struct SPI *spi, term init_list)
+{
+    term t = init_list;
+    while (term_is_nonempty_list(t)) {
+        term head = term_get_list_head(t);
+        if (term_is_tuple(head) && term_get_tuple_arity(head) == 2) {
+            term cmd_term = term_get_tuple_element(head, 0);
+            term data_term = term_get_tuple_element(head, 1);
+            if (term_is_integer(cmd_term) && term_is_binary(data_term)) {
+                avm_int_t cmd = term_to_int(cmd_term);
+                const uint8_t *data = (const uint8_t *) term_binary_data(data_term);
+                writecmddata(spi, cmd, data, term_binary_size(data_term));
+            } else if ((cmd_term == context_make_atom(spi->ctx, ATOM_STR("\x8", "sleep_ms")))
+                && term_is_integer(data_term)) {
+                delay(term_to_int(data_term));
+            } else {
+                // invalid
+                break;
+            }
+        } else {
+            // invalid
+            break;
+        }
+
+        t = term_get_list_tail(t);
+    }
+    if (t != term_nil()) {
+        fprintf(stderr, "Invalid init_list!\n");
+    }
 }
