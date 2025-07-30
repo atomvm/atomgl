@@ -740,12 +740,12 @@ static void display_init(Context *ctx, term opts)
         } else {
             display_init_std(spi);
         }
-    }
 
-    set_rotation(spi, spi->rotation);
+        set_rotation(spi, spi->rotation);
 
-    if (enable_tft_invon) {
-        writecommand(spi, ST7789_INVON);
+        if (enable_tft_invon) {
+            writecommand(spi, ST7789_INVON);
+        }
     }
 
     writecommand(spi, ST7789_DISPON);
