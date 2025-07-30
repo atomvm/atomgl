@@ -65,7 +65,8 @@ Context *display_create_port(GlobalContext *global, term opts)
         ctx = ssd1306_display_create_port(global, opts);
     } else if (!strcmp(compat_string, "sino-wealth,sh1106")) {
         ctx = ssd1306_display_create_port(global, opts);
-    } else if (!strcmp(compat_string, "sitronix,st7789")) {
+    } else if (!strcmp(compat_string, "sitronix,st7789")
+        || !strcmp(compat_string, "sitronix,st7796")) {
         ctx = st7789_display_create_port(global, opts);
     } else {
         ESP_LOGE(TAG, "No matching display driver for given `comptaible`: `%s`.", compat_string);
