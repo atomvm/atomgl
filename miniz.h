@@ -1,3 +1,9 @@
+/*
+SPDX-License-Identifier: MIT
+SPDX-FileCopyrightText: 2013-2014 RAD Game Tools and Valve Software
+SPDX-FileCopyrightText: 2010-2014 Rich Geldreich and Tenacious Software LLC
+*/
+
 #define MINIZ_EXPORT
 /* miniz.c 2.2.0 - public domain deflate/inflate, zlib-subset, ZIP reading/writing/appending, PNG writing
    See "unlicense" statement at the end of this file.
