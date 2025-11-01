@@ -89,6 +89,8 @@ software dithering
 
 [SDL Linux display](sdl_display/) is also supported and can be built as an AtomVM plugin.
 
+See also [display drivers](docs/display-drivers.md) documentation page for additional information.
+
 ## Platform Support
 
 AtomGL is currently compatible with **ESP32** microcontrollers. Linux with SDL is also supported for
