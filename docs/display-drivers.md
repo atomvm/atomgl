@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: Apache-2.0
+SPDX-FileCopyrightText: AtomGL contributors
+-->
+
 # Display Drivers
 
 This document describes how to configure and use the various display drivers supported by AtomGL.

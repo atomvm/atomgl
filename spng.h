@@ -1,4 +1,7 @@
-/* SPDX-License-Identifier: BSD-2-Clause */
+/*
+SPDX-License-Identifier: BSD-2-Clause
+SPDX-FileCopyrightText: libspng contributors (https://github.com/randy408/libspng/graphs/contributors)
+*/
 #ifndef SPNG_H
 #define SPNG_H
 
