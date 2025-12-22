@@ -84,8 +84,7 @@ bool spi_display_parse_config(struct SPIDisplayConfig *spi_config, term opts, Gl
         return false;
     }
 
-    int spi_host_atom_index = globalcontext_insert_atom(global, ATOM_STR("\x8", "spi_host"));
-    term spi_host_atom = term_from_atom_index(spi_host_atom_index);
+    term spi_host_atom = globalcontext_make_atom(global, ATOM_STR("\x8", "spi_host"));
     term spi_port = interop_proplist_get_value(opts, spi_host_atom);
 
     ok = spi_driver_get_peripheral(spi_port, &spi_config->host_dev, global);

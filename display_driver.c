@@ -37,8 +37,7 @@ Context *st7789_display_create_port(GlobalContext *global, term opts);
 
 Context *display_create_port(GlobalContext *global, term opts)
 {
-    int compat_atom_index = globalcontext_insert_atom(global, ATOM_STR("\xA", "compatible"));
-    term compat_atom = term_from_atom_index(compat_atom_index);
+    term compat_atom = globalcontext_make_atom(global, ATOM_STR("\xA", "compatible"));
 
     term compat_value_term = interop_proplist_get_value(opts, compat_atom);
     if (compat_value_term == term_nil()) {
