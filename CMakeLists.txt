@@ -31,6 +31,7 @@ idf_component_register(SRCS
     "display_driver.c"
     "5in65_acep_7c_display_driver.c"
     "ili934x_display_driver.c"
+    "ili948x_display_driver.c"
     "memory_display_driver.c"
     "ssd1306_display_driver.c"
     "st7789_display_driver.c"
