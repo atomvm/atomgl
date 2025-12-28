@@ -6,9 +6,7 @@
 
 name: ESP32 Builds
 
-on:
-  push: []
-  pull_request: []
+on: [push, pull_request]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref != 'refs/heads/main' && github.ref || github.run_id }}
