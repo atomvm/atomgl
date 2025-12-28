@@ -141,6 +141,46 @@ ili9341_opts = [
 ]
 ```
 
+### ILI9486 / ILI9488 (ilitek,ili9486 / ilitek,ili9488)
+
+320×480 TFT displays.
+
+- **ILI9486**: RGB565 over SPI (16-bit color)
+- **ILI9488**: RGB666 over SPI (18-bit color; transferred as 3 bytes/pixel). AtomGL renders in RGB565 and converts scanlines for transfer.
+
+**Compatible strings:** `"ilitek,ili9486"` or `"ilitek,ili9488"`
+
+| Option | Type | Description | Default |
+|--------|------|-------------|---------|
+| `spi_host` | term | SPI host reference | Required |
+| `width` | integer | Display width in pixels (kept for API consistency) | 320 |
+| `height` | integer | Display height in pixels (kept for API consistency) | 480 |
+| `cs` | integer | Chip select GPIO pin | Required |
+| `dc` | integer | Data/Command GPIO pin | Required |
+| `reset` | integer | Reset GPIO pin | Required |
+| `rotation` | integer | Display rotation (0-3) | 0 |
+| `enable_tft_invon` | boolean | Enable color inversion | false |
+| `color_order` | atom | Color order (:bgr/:rgb) | :bgr |
+| `backlight` | integer | Backlight GPIO pin | Optional |
+| `backlight_active` | atom | Backlight active level (:low/:high) | Optional |
+| `backlight_enabled` | boolean | Enable backlight on init | Optional |
+
+**Example:**
+```elixir
+ili948x_opts = [
+  spi_host: spi_host,
+  compatible: "ilitek,ili9488",
+  width: 320,
+  height: 480,
+  cs: 22,
+  dc: 21,
+  reset: 18,
+  rotation: 1,
+  enable_tft_invon: false,
+  color_order: :bgr
+]
+```
+
 ### ST7789 / ST7796 (sitronix,st7789 / sitronix,st7796)
 
 TFT displays with 16-bit colors.
