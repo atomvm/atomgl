@@ -24,33 +24,33 @@ jobs:
 
       matrix:
         idf-version:
-        - '4.4.6'
-        - '5.0.6'
-        - '5.1.3'
+          - "4.4.6"
+          - "5.0.6"
+          - "5.1.3"
 
     steps:
-    - name: Checkout repo
-      uses: actions/checkout@v4
-      with:
-        repository: 'atomvm/AtomVM'
-        ref: 'release-0.6'
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          repository: "atomvm/AtomVM"
+          ref: "release-0.6"
 
-    - name: Checkout repo
-      uses: actions/checkout@v4
-      with:
-        path: './src/platforms/esp32/components/atomgl/'
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          path: "./src/platforms/esp32/components/atomgl/"
 
-    - name: Build with idf.py
-      shell: bash
-      working-directory: ./src/platforms/esp32/
-      run: |
-        . $IDF_PATH/export.sh
-        idf.py reconfigure
-        idf.py build
-        idf.py size
-    - name: Print component size info with idf.py
-      shell: bash
-      working-directory: ./src/platforms/esp32/
-      run: |
-        . $IDF_PATH/export.sh
-        idf.py size-components
+      - name: Build with idf.py
+        shell: bash
+        working-directory: ./src/platforms/esp32/
+        run: |
+          . $IDF_PATH/export.sh
+          idf.py reconfigure
+          idf.py build
+          idf.py size
+      - name: Print component size info with idf.py
+        shell: bash
+        working-directory: ./src/platforms/esp32/
+        run: |
+          . $IDF_PATH/export.sh
+          idf.py size-components
