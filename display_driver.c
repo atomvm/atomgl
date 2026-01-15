@@ -67,6 +67,8 @@ Context *display_create_port(GlobalContext *global, term opts)
         ctx = ili948x_display_create_port(global, opts);
     } else if (!strcmp(compat_string, "solomon-systech,ssd1306")) {
         ctx = ssd1306_display_create_port(global, opts);
+    } else if (!strcmp(compat_string, "solomon-systech,ssd1315")) {
+        ctx = ssd1306_display_create_port(global, opts);
     } else if (!strcmp(compat_string, "sino-wealth,sh1106")) {
         ctx = ssd1306_display_create_port(global, opts);
     } else if (!strcmp(compat_string, "sitronix,st7789")
