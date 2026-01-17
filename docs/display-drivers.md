@@ -334,7 +334,7 @@ items = [
 ]
 
 # Send update command
-:erlang.port_call(display, {:update, items}, 5000)
+:port.call(display, {:update, items}, 5000)
 ```
 
 **Note:** While direct port calls work, the recommended approach is to use [avm_scene](https://github.com/atomvm/avm_scene) which provides a higher-level interface for managing display updates and handling the display list lifecycle properly.
