@@ -42,7 +42,6 @@
 #define CHAR_WIDTH 8
 
 #define I2C_ADDRESS 0x3C
-#define I2C_CHUNK_SIZE 64
 
 #define CTRL_BYTE_CMD_SINGLE 0x80
 #define CTRL_BYTE_CMD_STREAM 0x00
@@ -190,16 +189,19 @@ static void display_init(Context *ctx, term opts)
     term compat_value_term = interop_kv_get_value_default(opts, ATOM_STR("\xA", "compatible"), term_nil(), ctx->global);
     int str_ok;
     char *compat_string = interop_term_to_string(compat_value_term, &str_ok);
-    if (str_ok && compat_string) {
-        if (!strcmp(compat_string, "sino-wealth,sh1106")) {
-            spi->type = DISPLAY_SH1106;
-        } else if (!strcmp(compat_string, "solomon-systech,ssd1315")) {
-            spi->type = DISPLAY_SSD1315;
-        }
-        free(compat_string);
-    } else {
+
+    if (!(str_ok && compat_string)) {
+        ESP_LOGE(TAG, "No Compatible Device Found.");
         return;
     }
+
+    if (!strcmp(compat_string, "sino-wealth,sh1106")) {
+        spi->type = DISPLAY_SH1106;
+    } else if (!strcmp(compat_string, "solomon-systech,ssd1315")) {
+        spi->type = DISPLAY_SSD1315;
+    }
+
+    free(compat_string);
 
     int reset_gpio;
     if (!display_common_gpio_from_opts(opts, ATOM_STR("\x5", "reset"), &reset_gpio, glb)) {
@@ -227,49 +229,47 @@ static void display_init(Context *ctx, term opts)
         /*
          * Init sequence derived from u8g2 project (BSD-2-Clause).
          * Source: https://github.com/olikraus/u8g2
-         * 
+         *
          * These values are standard hardware initialization commands
          * defined by the Solomon Systech SSD1315 datasheet.
          */
 
         i2c_master_write_byte(cmd, 0xAE, true);  // Display OFF
-        
+
         i2c_master_write_byte(cmd, 0xD5, true);  // Set Display Clock Divide Ratio / Oscillator Frequency
         i2c_master_write_byte(cmd, 0x80, true);  // 0x80 is standard/stable
-        
+
         i2c_master_write_byte(cmd, 0xA8, true);  // Set Multiplex Ratio
         i2c_master_write_byte(cmd, 0x3F, true);  // 64 MUX
-        
+
         i2c_master_write_byte(cmd, 0xD3, true);  // Set Display Offset
         i2c_master_write_byte(cmd, 0x00, true);  // No offset
-        
+
         i2c_master_write_byte(cmd, 0x40, true);  // Set Display Start Line to 0
-        
+
         i2c_master_write_byte(cmd, 0x8D, true);  // Set Charge Pump
         i2c_master_write_byte(cmd, 0x14, true);  // Enable Charge Pump
-        
+
         i2c_master_write_byte(cmd, 0xA1, true);  // Set Segment Remap
         i2c_master_write_byte(cmd, 0xC8, true);  // Set COM Scan Mode
-        
+
         i2c_master_write_byte(cmd, 0xDA, true);  // Set COM Pins Hardware Configuration
         i2c_master_write_byte(cmd, 0x12, true);  // Alternative COM pin config
-        
+
         i2c_master_write_byte(cmd, 0x81, true);  // Set Contrast Control
         i2c_master_write_byte(cmd, 0xCF, true);  // Use High Contrast (0xCF) as per u8x8
-        
+
         i2c_master_write_byte(cmd, 0xD9, true);  // Set Pre-charge Period
         i2c_master_write_byte(cmd, 0xF1, true);  // 0xF1 is required for stable 400kHz operation
-        
+
         i2c_master_write_byte(cmd, 0xDB, true);  // Set VCOMH Deselect Level
         i2c_master_write_byte(cmd, 0x40, true);  // 0x40 (approx 0.77x VCC)
-        
+
         i2c_master_write_byte(cmd, 0xA4, true);  // Resume to RAM content display
         i2c_master_write_byte(cmd, 0xA6, true);  // Normal Display (not inverted)
-        
+
         i2c_master_write_byte(cmd, 0xAD, true);  // Internal IREF Setting
         i2c_master_write_byte(cmd, 0x10, true);  // Internal Iref
-        
-        i2c_master_write_byte(cmd, 0xAF, true);  // Display ON
     } else {
         i2c_master_write_byte(cmd, CMD_SET_CHARGE_PUMP, true);
         i2c_master_write_byte(cmd, 0x14, true);
