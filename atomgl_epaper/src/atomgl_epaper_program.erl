@@ -7,6 +7,7 @@
     program/1,
     cmd/1,
     cmd/2,
+    cmd_delay/3,
     wait_busy/2,
     reset/3,
     insert_plane/1,
@@ -41,6 +42,9 @@ cmd(Cmd, Data) when is_list(Data) ->
     cmd(Cmd, list_to_binary(Data));
 cmd(Cmd, Data) when byte_size(Data) =< ?LEN_MASK ->
     <<Cmd, (byte_size(Data)), Data/binary>>.
+
+cmd_delay(Cmd, Data, DelayMs) when byte_size(Data) =< ?LEN_MASK ->
+    <<Cmd, (?DELAY bor byte_size(Data)), Data/binary, DelayMs>>.
 
 wait_busy(Level, TimeoutMs) ->
     meta(?OP_WAIT_BUSY, <<Level, TimeoutMs:16/little-unsigned-integer>>).

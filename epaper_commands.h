@@ -53,14 +53,6 @@
 void epaper_execute_init_seq(struct SPIDCBus *bus, int busy_gpio,
     const uint8_t *seq, size_t seq_len, bool wait_busy_between_cmds);
 
-// Built-in init sequences.  Each array is paired with a size_t
-// constant giving its length; callers pass both to
-// epaper_execute_init_seq().
-extern const uint8_t epaper_init_seq_acep7c[];
-extern const size_t epaper_init_seq_acep7c_len;
-extern const uint8_t epaper_init_seq_gdep073e01[];
-extern const size_t epaper_init_seq_gdep073e01_len;
-
 // --- Per-panel descriptor ---
 //
 enum EPaperController
@@ -68,6 +60,8 @@ enum EPaperController
     EPAPER_CONTROLLER_ACEP7,
     EPAPER_CONTROLLER_SSD16XX,
     EPAPER_CONTROLLER_JD79656,
+    EPAPER_CONTROLLER_UC8151,
+    EPAPER_CONTROLLER_UC8276,
     EPAPER_CONTROLLER_UC8175
 };
 
@@ -89,13 +83,6 @@ enum EPaperPolarity
     EPAPER_POLARITY_BLACK_IS_1
 };
 
-enum EPaperCommandTarget
-{
-    EPAPER_COMMAND_TARGET_CURRENT_PLANE,
-    EPAPER_COMMAND_TARGET_PREVIOUS_PLANE,
-    EPAPER_COMMAND_TARGET_COLOR_PLANE
-};
-
 enum EPaperRefreshMode
 {
     EPAPER_REFRESH_FULL,
@@ -112,7 +99,7 @@ struct EPaperFrameLayout
 };
 
 // Captures every panel-specific knob so a single unified driver can
-// drive multiple controllers by compatible-string dispatch.
+// drive multiple controllers by descriptor dispatch.
 
 struct EPaperDesc
 {
@@ -130,7 +117,6 @@ struct EPaperDesc
 
     enum EPaperController controller;
     struct EPaperFrameLayout layout;
-    enum EPaperCommandTarget command_target;
 
     // One-time init sequence (format documented above).
     const uint8_t *init_seq;
@@ -186,8 +172,5 @@ struct EPaperDesc
 
     enum EPaperRefreshMode default_refresh;
 };
-
-extern const struct EPaperDesc epaper_desc_acep7c;
-extern const struct EPaperDesc epaper_desc_gdep073e01;
 
 #endif
