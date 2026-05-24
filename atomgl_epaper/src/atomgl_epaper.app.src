@@ -1,0 +1,13 @@
+%% SPDX-License-Identifier: Apache-2.0
+%% SPDX-FileCopyrightText: 2026 Peter M <petermm@gmail.com>
+
+{application, atomgl_epaper, [
+    {description, "AtomGL e-paper panel descriptors and bytecode builders"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {applications, [kernel, stdlib]},
+    {env, []},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, [{"GitHub", "https://github.com/atomvm/atomgl"}]}
+]}.

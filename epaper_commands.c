@@ -34,6 +34,11 @@ static void wait_busy_high(int busy_gpio)
     }
 }
 
+static TickType_t delay_ms_to_ticks(uint32_t delay_ms)
+{
+    return (delay_ms + portTICK_PERIOD_MS - 1) / portTICK_PERIOD_MS;
+}
+
 void epaper_execute_init_seq(struct SPIDCBus *bus, int busy_gpio,
     const uint8_t *seq, size_t seq_len, bool wait_busy_between_cmds)
 {
@@ -47,7 +52,10 @@ void epaper_execute_init_seq(struct SPIDCBus *bus, int busy_gpio,
         seq += len;
 
         if (flags_len & EPAPER_INIT_SEQ_DELAY) {
-            vTaskDelay(*seq++ / portTICK_PERIOD_MS);
+            uint8_t delay_ms = *seq++;
+            if (delay_ms > 0) {
+                vTaskDelay(delay_ms_to_ticks(delay_ms));
+            }
         }
 
         if (wait_busy_between_cmds) {
@@ -129,14 +137,25 @@ const struct EPaperDesc epaper_desc_acep7c = {
     .name                        = "Waveshare 5.65\" ACeP 7-color",
     .native_width                = 600,
     .native_height               = 448,
+    .view_width                  = 600,
+    .view_height                 = 448,
+    .rotation                    = 0,
     .spi_clock_hz                = 1000000,
 
     .palette                     = epaper_acep_palette,
     .palette_size                = 7,
+    .controller                  = EPAPER_CONTROLLER_RAW,
+    .layout                      = {
+        .byte_order = EPAPER_BYTE_ORDER_ROW_MAJOR,
+        .bit_order = EPAPER_BIT_ORDER_MSB_LEFT,
+        .polarity = EPAPER_POLARITY_WHITE_IS_1
+    },
+    .command_target              = EPAPER_COMMAND_TARGET_COLOR_PLANE,
 
     .init_seq                    = epaper_init_seq_acep7c,
     .init_seq_len                = sizeof(epaper_init_seq_acep7c),
     .init_wait_busy_between_cmds = false,
+    .use_gpio_pullups            = true,
 
     .frame_preamble_seq          = epaper_preamble_acep7c,
     .frame_preamble_seq_len      = sizeof(epaper_preamble_acep7c),
@@ -144,6 +163,7 @@ const struct EPaperDesc epaper_desc_acep7c = {
     .refresh_has_data            = false,
     .refresh_data_byte           = 0x00,
     .post_power_off_busy_level   = 0,
+    .busy_idle_level             = 1,
 
     .periodic_refresh_interval   = 5,
 };
@@ -152,14 +172,25 @@ const struct EPaperDesc epaper_desc_gdep073e01 = {
     .name                        = "Good Display GDEP073E01 7.3\" 7-color",
     .native_width                = 800,
     .native_height               = 480,
+    .view_width                  = 800,
+    .view_height                 = 480,
+    .rotation                    = 0,
     .spi_clock_hz                = 4000000,
 
     .palette                     = epaper_gdep073e01_palette,
     .palette_size                = 7,
+    .controller                  = EPAPER_CONTROLLER_RAW,
+    .layout                      = {
+        .byte_order = EPAPER_BYTE_ORDER_ROW_MAJOR,
+        .bit_order = EPAPER_BIT_ORDER_MSB_LEFT,
+        .polarity = EPAPER_POLARITY_WHITE_IS_1
+    },
+    .command_target              = EPAPER_COMMAND_TARGET_COLOR_PLANE,
 
     .init_seq                    = epaper_init_seq_gdep073e01,
     .init_seq_len                = sizeof(epaper_init_seq_gdep073e01),
     .init_wait_busy_between_cmds = true,
+    .use_gpio_pullups            = true,
 
     .frame_preamble_seq          = NULL,
     .frame_preamble_seq_len      = 0,
@@ -167,6 +198,7 @@ const struct EPaperDesc epaper_desc_gdep073e01 = {
     .refresh_has_data            = true,
     .refresh_data_byte           = 0x00,
     .post_power_off_busy_level   = 1,
+    .busy_idle_level             = 1,
 
     .periodic_refresh_interval   = 0,
 };
