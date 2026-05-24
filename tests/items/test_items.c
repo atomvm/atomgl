@@ -1233,10 +1233,11 @@ typedef enum
 {
     RendererDcsLcd,
     RendererMono,
-    RendererEpaper
+    RendererEpaper,
+    RendererEpaper4gray
 } renderer_t;
 
-static const char *const renderer_names[] = { "dcs_lcd", "mono", "epaper" };
+static const char *const renderer_names[] = { "dcs_lcd", "mono", "epaper", "epaper_4gray" };
 
 static int renderer_line_bytes(renderer_t renderer)
 {
@@ -1244,6 +1245,7 @@ static int renderer_line_bytes(renderer_t renderer)
         case RendererMono:
             return SCREEN_W / 8;
         case RendererEpaper:
+        case RendererEpaper4gray:
             return SCREEN_W / 2;
         default:
             return SCREEN_W * 2;
@@ -1260,6 +1262,12 @@ static int renderer_draw_x(renderer_t renderer, int w, uint16_t *line, int xpos,
         case RendererEpaper: {
             struct EpaperScreen screen = { .w = w, .h = SCREEN_H, .palette = epaper_acep_palette, .palette_size = 7 };
             return epaper_draw_x(&screen, (uint8_t *) line, xpos, ypos, row);
+        }
+        case RendererEpaper4gray: {
+            struct EpaperScreen screen = {
+                .w = w, .h = SCREEN_H, .palette = epaper_ssd1680_4gray_palette, .palette_size = 4
+            };
+            return epaper_draw_4gray_x(&screen, (uint8_t *) line, xpos, ypos, row);
         }
         default: {
             struct DCSLCDScreen screen;
@@ -1410,7 +1418,7 @@ static void test_runs_match_pixels(void)
         }
 
         bool same = true;
-        for (renderer_t renderer = RendererDcsLcd; renderer <= RendererEpaper && same; renderer++) {
+        for (renderer_t renderer = RendererDcsLcd; renderer <= RendererEpaper4gray && same; renderer++) {
             render_items(renderer, items, len, expected, true);
             render_items(renderer, items, len, frame, false);
             same = memcmp(expected, frame, renderer_line_bytes(renderer) * SCREEN_H) == 0;

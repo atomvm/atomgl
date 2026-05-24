@@ -37,6 +37,12 @@ Context *oled_display_create_port(GlobalContext *global, term opts);
 Context *display_create_port(GlobalContext *global, term opts)
 {
     term compat_atom = globalcontext_make_atom(global, ATOM_STR("\xA", "compatible"));
+    term descriptor_atom = globalcontext_make_atom(global, ATOM_STR("\xA", "descriptor"));
+
+    term descriptor_term = interop_proplist_get_value(opts, descriptor_atom);
+    if (descriptor_term != term_nil()) {
+        return epaper_display_create_port(global, opts);
+    }
 
     term compat_value_term = interop_proplist_get_value(opts, compat_atom);
     if (compat_value_term == term_nil()) {

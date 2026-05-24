@@ -93,6 +93,39 @@ software dithering
 
 See also [display drivers](docs/display-drivers.md) documentation page for additional information.
 
+### E-paper panel descriptors
+
+Ready-made e-paper panel descriptors are provided as a separate,
+dependency-free Erlang/OTP library in [`atomgl_epaper/`](atomgl_epaper/). It
+can be consumed as a sparse / `subdir` dependency directly from this
+repository — see [`atomgl_epaper/README.md`](atomgl_epaper/README.md) for
+details.
+
+For Erlang (`rebar3`):
+
+```erlang
+%% rebar.config
+{deps, [
+    {atomgl_epaper,
+        {git, "https://github.com/atomvm/atomgl.git", {branch, "main"}},
+        [{subdir, "atomgl_epaper"}]}
+]}.
+```
+
+For Elixir (Mix), add the dependency to `mix.exs`:
+
+```elixir
+# mix.exs
+defp deps do
+  [
+    {:atomgl_epaper,
+      github: "atomvm/atomgl",
+      branch: "main",
+      sparse: "atomgl_epaper"}
+  ]
+end
+```
+
 ## Platform Support
 
 AtomGL is currently compatible with **ESP32** microcontrollers. Linux with SDL is also supported for

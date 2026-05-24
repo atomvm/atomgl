@@ -38,6 +38,7 @@ idf_component_register(SRCS
     "epaper_color.c"
     "epaper_commands.c"
     "epaper_draw.c"
+    "epaper_program.c"
     "mono_draw.c"
     "epaper_display_driver.c"
     "font_data.c"
