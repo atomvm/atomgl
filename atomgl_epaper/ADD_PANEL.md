@@ -49,7 +49,8 @@ Collect these facts for the target panel:
 - RAM data commands for old/current planes or color planes.
 - Frame layout: row-major or column-major, MSB or LSB first.
 - Pixel polarity: whether `1` means white or black.
-- Refresh modes: full, fast, partial, 4-gray, color, sleep.
+- Refresh modes: full, fast, partial, 4-gray, and color; sleep modes are
+  described separately via `sleep_modes`.
 - LUT format and whether extra register bytes accompany the LUT payload.
 - Any controller-specific plane mapping, palette, or ghosting constraints.
 
@@ -99,7 +100,7 @@ Important local paths:
    - Optional aliases for mode defaults, such as `-fast`, `-partial`, or
      `-4gray`.
    - Native geometry, palette size, refresh modes, and default refresh mode.
-   - Init, refresh, partial, 4-gray, LUT, and sleep programs as needed.
+   - Init, refresh, partial, 4-gray, LUT, and `sleep_modes` programs as needed.
    - Helper functions only when they reduce duplication or make the sequence
      easier to audit.
 
@@ -143,7 +144,8 @@ available in your environment. If hardware is available, verify:
 - Full refresh clears and draws correctly.
 - Fast or partial refresh updates the expected window without stale-plane
   artifacts.
-- Sleep and wake work repeatedly.
+- Standby/sleep/deep-sleep and wake work repeatedly for every exposed
+  `sleep_modes` entry.
 - 4-gray or color palettes map white, gray/color levels, and black correctly.
 - Timeout behavior matches the panel BUSY polarity.
 

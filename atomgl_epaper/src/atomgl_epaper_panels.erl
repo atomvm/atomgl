@@ -47,7 +47,7 @@ panel("waveshare,epd2in9", Opts) ->
         init => uc8151_init(296, 16#03, ?LUT_FULL),
         full => uc8151_refresh(128, 296, ?LUT_FULL),
         partial => uc8151_refresh(128, 296, ?LUT_PARTIAL),
-        sleep => cmd(16#10, <<16#01>>),
+        sleep_modes => controller_sleep_modes(sleep_program(0)),
         lut_full => uc8151_2in9_full_lut(),
         lut_partial => uc8151_2in9_partial_lut()
     }, Opts));
@@ -63,7 +63,7 @@ panel("waveshare,epd2in9_V2", Opts) ->
         fast => epd2in9_v2_refresh(?LUT_FAST, 16#C7),
         partial => epd2in9_v2_partial_refresh(),
         '4gray' => epd2in9_v2_4gray_refresh(),
-        sleep => cmd(16#10, <<16#01>>),
+        sleep_modes => ssd16xx_sleep_modes(100),
         lut_full => epd2in9_v2_default_lut(),
         lut_fast => epd2in9_v2_fast_lut(),
         lut_partial => epd2in9_v2_partial_lut(),
@@ -83,7 +83,7 @@ panel("dke,depg0290bns800f6", Opts) ->
         default_refresh => full,
         init => ssd1680_2in9_init(),
         full => ssd1680_2in9_refresh(),
-        sleep => cmd(16#10, <<16#01>>)
+        sleep_modes => ssd16xx_sleep_modes(0)
     }, Opts));
 panel("waveshare,epaper-2in13", Opts) ->
     panel("waveshare,epd2in13_V4", Opts);
@@ -96,7 +96,7 @@ panel("waveshare,epd2in13", Opts) ->
         init => uc8151_init(250, 16#63, ?LUT_FULL),
         full => uc8151_refresh(122, 250, ?LUT_FULL),
         partial => uc8151_refresh(122, 250, ?LUT_PARTIAL),
-        sleep => cmd(16#10, <<16#01>>),
+        sleep_modes => controller_sleep_modes(sleep_program(0)),
         lut_full => uc8151_2in13_full_lut(),
         lut_partial => uc8151_2in13_partial_lut()
     }, Opts));
@@ -110,7 +110,7 @@ panel("waveshare,epd2in13_V4", Opts) ->
         full => epd2in13_v4_refresh(16#F7),
         fast => epd2in13_v4_refresh(16#C7),
         partial => epd2in13_v4_partial_refresh(),
-        sleep => cmd(16#10, <<16#01>>)
+        sleep_modes => ssd16xx_sleep_modes(100)
     }, Opts));
 panel("waveshare,epd2in13_V4-fast", Opts) ->
     panel("waveshare,epd2in13_V4", maps:merge(#{default_refresh => fast}, Opts));
@@ -128,7 +128,7 @@ panel("waveshare,epd4in2_V2", Opts) ->
         fast => uc8276_refresh(uc8276_fast_prelude(16#6E), 16#C7),
         partial => uc8276_partial_refresh(),
         '4gray' => uc8276_4gray_refresh(),
-        sleep => cmd(16#10, <<16#01>>),
+        sleep_modes => controller_sleep_modes(sleep_program(200)),
         lut_4gray => uc8276_4gray_lut()
     }, Opts));
 panel("waveshare,epd4in2_V2-fast", Opts) ->
@@ -145,7 +145,7 @@ panel("heltec,lcmen2r13efc1", Opts) ->
         default_refresh => full,
         init => heltec_lcmen2r13efc1_init(),
         full => heltec_lcmen2r13efc1_refresh(),
-        sleep => program([cmd(16#02), wait_busy(1, 5000)])
+        sleep_modes => standby_sleep_modes(program([cmd(16#02), wait_busy(1, 5000)]))
     }, Opts));
 panel("heltec,icmen2r13efc1", Opts) ->
     panel("heltec,lcmen2r13efc1", Opts);
@@ -165,7 +165,8 @@ panel("waveshare,5in65-acep-7c", Opts) ->
         refresh_has_data => false,
         refresh_data_byte => 0,
         post_power_off_busy_level => 0,
-        periodic_refresh_interval => 5
+        periodic_refresh_interval => 5,
+        sleep_modes => acep7_sleep_modes(0, none)
     }, Opts));
 panel("good-display/gdep073e01", Opts) ->
     acep7_panel("Good Display GDEP073E01 7.3\" 7-color", maps:merge(#{
@@ -180,10 +181,69 @@ panel("good-display/gdep073e01", Opts) ->
         refresh_has_data => true,
         refresh_data_byte => 0,
         post_power_off_busy_level => 1,
-        periodic_refresh_interval => 0
+        periodic_refresh_interval => 0,
+        sleep_modes => acep7_sleep_modes(1, <<16#00>>)
     }, Opts));
 panel(_, _Opts) ->
     error.
+
+ssd16xx_sleep_modes(DelayMs) ->
+    [
+        {sleep, sleep_mode(sleep_program(DelayMs), reset_init,
+            retained, preserve, allow_if_program_reseeds)},
+        {deep_sleep, sleep_mode(deep_sleep_program(DelayMs), reset_init,
+            lost, preserve, allow_if_program_reseeds)}
+    ].
+
+controller_sleep_modes(EnterProgram) ->
+    [
+        {sleep, sleep_mode(EnterProgram, reset_init,
+            unknown, preserve, allow_if_program_reseeds)}
+    ].
+
+standby_sleep_modes(EnterProgram) ->
+    [
+        {standby, sleep_mode(EnterProgram, reset_init,
+            unknown, invalidate, full)}
+    ].
+
+acep7_sleep_modes(BusyLevel, PowerOffData) ->
+    [
+        {standby, sleep_mode(acep7_power_off_program(BusyLevel, PowerOffData),
+            init, unknown, invalidate, full)},
+        {deep_sleep, sleep_mode(acep7_deep_sleep_program(BusyLevel, PowerOffData),
+            reset_init, lost, invalidate, full)}
+    ].
+
+sleep_mode(Enter, Wake, ControllerRam, HostPrevFrame, AfterWakeRefresh) ->
+    [
+        {enter, Enter},
+        {wake, Wake},
+        {controller_ram, ControllerRam},
+        {host_prev_frame, HostPrevFrame},
+        {after_wake_refresh, AfterWakeRefresh}
+    ].
+
+sleep_program(0) ->
+    cmd(16#10, <<16#01>>);
+sleep_program(DelayMs) ->
+    program([cmd(16#10, <<16#01>>), delay_ms(DelayMs)]).
+
+deep_sleep_program(0) ->
+    cmd(16#10, <<16#03>>);
+deep_sleep_program(DelayMs) ->
+    program([cmd(16#10, <<16#03>>), delay_ms(DelayMs)]).
+
+acep7_power_off_program(BusyLevel, PowerOffData) ->
+    program(acep7_power_off_steps(BusyLevel, PowerOffData)).
+
+acep7_deep_sleep_program(BusyLevel, PowerOffData) ->
+    program([acep7_power_off_steps(BusyLevel, PowerOffData), cmd(16#07, <<16#A5>>)]).
+
+acep7_power_off_steps(BusyLevel, none) ->
+    [cmd(16#02), wait_busy(BusyLevel, 5000)];
+acep7_power_off_steps(BusyLevel, PowerOffData) ->
+    [cmd(16#02, PowerOffData), wait_busy(BusyLevel, 5000)].
 
 uc8151_init(NativeHeight, BorderWaveform, LutSlot) ->
     DriverOutput = NativeHeight - 1,

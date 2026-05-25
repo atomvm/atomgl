@@ -3,6 +3,8 @@
 
 -module(atomgl_epaper_descriptor).
 
+-define(MAX_SLEEP_MODES, 8).
+
 -export([
     ssd16xx_panel/2,
     jd79656_panel/2,
@@ -32,7 +34,7 @@ acep7_panel(Name, Config) ->
     ViewH = maps:get(view_height, Config, NativeH),
 
     Descriptor = [
-        {descriptor_version, 2},
+        {descriptor_version, 3},
         {name, Name},
         {controller, acep7},
         {native_width, NativeW},
@@ -54,7 +56,8 @@ acep7_panel(Name, Config) ->
         {refresh_has_data, maps:get(refresh_has_data, Config, false)},
         {refresh_data_byte, maps:get(refresh_data_byte, Config, 0)},
         {post_power_off_busy_level, maps:get(post_power_off_busy_level, Config, 0)},
-        {periodic_refresh_interval, maps:get(periodic_refresh_interval, Config, 0)}
+        {periodic_refresh_interval, maps:get(periodic_refresh_interval, Config, 0)},
+        {sleep_modes, maps:get(sleep_modes, Config, [])}
     ] ++ case maps:find(frame_preamble_seq, Config) of
         {ok, FramePreambleSeq} -> [{frame_preamble_seq, FramePreambleSeq}];
         error -> []
@@ -103,7 +106,7 @@ build_panel(Controller, Name, Config) ->
     end,
 
     Descriptor = [
-        {descriptor_version, 2},
+        {descriptor_version, 3},
         {name, Name},
         {controller, Controller},
         {native_width, NativeW},
@@ -120,6 +123,7 @@ build_panel(Controller, Name, Config) ->
         {default_refresh, DefaultRefresh},
         {palette_size, PaletteSize},
         {programs, Programs},
+        {sleep_modes, maps:get(sleep_modes, Config, [])},
         {timing, Timing},
         {ghosting, Ghosting}
     ] ++ [L || L = {_, Bin} <- Luts, Bin =/= <<>>],
@@ -144,15 +148,11 @@ mode_programs(Config) ->
         {ok, Partial} -> [{partial, Partial} | P3];
         error -> P3
     end,
-    P5 = case maps:find(sleep, Config) of
-        {ok, Sleep} -> [{sleep, Sleep} | P4];
+    P5 = case maps:find('4gray', Config) of
+        {ok, FourGray} -> [{'4gray', FourGray} | P4];
         error -> P4
     end,
-    P6 = case maps:find('4gray', Config) of
-        {ok, FourGray} -> [{'4gray', FourGray} | P5];
-        error -> P5
-    end,
-    P6.
+    P5.
 
 timing(Config) ->
     [
@@ -164,7 +164,7 @@ timing(Config) ->
 
 validate_descriptor(Desc) ->
     Version = get_value(descriptor_version, Desc),
-    true = (Version == 2),
+    true = (Version == 3),
 
     NativeW = get_value(native_width, Desc),
     NativeH = get_value(native_height, Desc),
@@ -205,7 +205,9 @@ validate_descriptor(Desc) ->
 
     DefaultRefresh = get_value(default_refresh, Desc),
     RefreshModes = get_value(refresh_modes, Desc),
+    validate_refresh_modes(RefreshModes),
     true = lists:member(DefaultRefresh, RefreshModes),
+    validate_sleep_modes(get_value(sleep_modes, Desc, [])),
 
     case Controller of
         acep7 ->
@@ -234,6 +236,48 @@ validate_descriptor(Desc) ->
     end,
 
     {ok, Desc}.
+
+validate_refresh_modes(RefreshModes) when is_list(RefreshModes) ->
+    true = (RefreshModes =/= []),
+    true = lists:member(full, RefreshModes),
+    true = (length(RefreshModes) == length(lists:usort(RefreshModes))),
+    lists:foreach(fun(Mode) ->
+        true = lists:member(Mode, [full, fast, partial, '4gray'])
+    end, RefreshModes);
+validate_refresh_modes(_) ->
+    error(bad_refresh_modes).
+
+validate_sleep_modes(SleepModes) when is_list(SleepModes) ->
+    true = (length(SleepModes) =< ?MAX_SLEEP_MODES),
+    Modes = lists:map(fun
+        ({Mode, _Props}) when is_atom(Mode) -> Mode;
+        (_) -> error(bad_sleep_mode)
+    end, SleepModes),
+    true = (length(Modes) == length(lists:usort(Modes))),
+    lists:foreach(fun validate_sleep_mode/1, SleepModes);
+validate_sleep_modes(_) ->
+    error(bad_sleep_modes).
+
+validate_sleep_mode({Mode, Props}) when is_atom(Mode), is_list(Props) ->
+    Enter = get_value(enter, Props),
+    true = is_binary(Enter),
+    true = (byte_size(Enter) =< 4096),
+    Wake = get_value(wake, Props, reset_init),
+    true = (is_binary(Wake) orelse lists:member(Wake, [init, reset_init])),
+    case Wake of
+        Bin when is_binary(Bin) ->
+            true = (byte_size(Bin) =< 4096);
+        _ ->
+            ok
+    end,
+    true = lists:member(get_value(controller_ram, Props, unknown),
+        [unknown, retained, lost]),
+    true = lists:member(get_value(host_prev_frame, Props, invalidate),
+        [preserve, invalidate]),
+    true = lists:member(get_value(after_wake_refresh, Props, full),
+        [allow, full, allow_if_program_reseeds]);
+validate_sleep_mode(_) ->
+    error(bad_sleep_mode).
 
 get_value(Key, List) ->
     get_value(Key, List, undefined).

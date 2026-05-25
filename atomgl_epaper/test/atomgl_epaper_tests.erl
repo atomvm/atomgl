@@ -46,7 +46,7 @@ orientation_geometry_test_() ->
 
 invalid_rotation_descriptor_test() ->
     Desc = [
-        {descriptor_version, 2},
+        {descriptor_version, 3},
         {controller, ssd16xx},
         {native_width, 128},
         {native_height, 296},
@@ -62,7 +62,7 @@ invalid_rotation_descriptor_test() ->
 
 invalid_rotated_view_geometry_test() ->
     Desc = [
-        {descriptor_version, 2},
+        {descriptor_version, 3},
         {controller, ssd16xx},
         {native_width, 128},
         {native_height, 296},
@@ -75,6 +75,34 @@ invalid_rotated_view_geometry_test() ->
         {programs, [{init, <<>>}, {full, <<>>}]}
     ],
     ?assertError({badmatch, false}, validate_descriptor(Desc)).
+
+invalid_refresh_modes_descriptor_test_() ->
+    BaseDesc = [
+        {descriptor_version, 3},
+        {controller, ssd16xx},
+        {native_width, 128},
+        {native_height, 296},
+        {view_width, 128},
+        {view_height, 296},
+        {rotation, 0},
+        {frame_layout, row_msb},
+        {default_refresh, full},
+        {programs, [{init, <<>>}, {full, <<>>}, {partial, <<>>}]}
+    ],
+    [
+        ?_test(begin
+            ?assertError({badmatch, false},
+                validate_descriptor([{refresh_modes, [full, partial, partial]} | BaseDesc]))
+        end),
+        ?_test(begin
+            ?assertError({badmatch, false},
+                validate_descriptor([{refresh_modes, [partial]} | BaseDesc]))
+        end),
+        ?_test(begin
+            ?assertError({badmatch, false},
+                validate_descriptor([{refresh_modes, [full, turbo]} | BaseDesc]))
+        end)
+    ].
 
 uc8151_panel_descriptor_test_() ->
     [
@@ -115,6 +143,78 @@ uc8276_panel_descriptor_test_() ->
             {ok, Desc} = panel("waveshare,epd4in2_V2-4gray"),
             ?assertEqual(uc8276, get_value(controller, Desc)),
             ?assertEqual('4gray', get_value(default_refresh, Desc))
+        end)
+    ].
+
+sleep_modes_descriptor_test_() ->
+    [
+        ?_test(begin
+            {ok, Desc} = panel("waveshare,epd2in9_V2"),
+            ?assertEqual(3, get_value(descriptor_version, Desc)),
+            SleepModes = get_value(sleep_modes, Desc),
+            Sleep = get_value(sleep, SleepModes),
+            DeepSleep = get_value(deep_sleep, SleepModes),
+            ?assertEqual(<<16#10, 1, 16#01, 16#10, 16#C1, 0, 100>>,
+                get_value(enter, Sleep)),
+            ?assertEqual(retained, get_value(controller_ram, Sleep)),
+            ?assertEqual(preserve, get_value(host_prev_frame, Sleep)),
+            ?assertEqual(allow_if_program_reseeds, get_value(after_wake_refresh, Sleep)),
+            ?assertEqual(<<16#10, 1, 16#03, 16#10, 16#C1, 0, 100>>,
+                get_value(enter, DeepSleep)),
+            ?assertEqual(lost, get_value(controller_ram, DeepSleep))
+        end),
+        ?_test(begin
+            {ok, Desc} = panel("waveshare,epd4in2_V2"),
+            SleepModes = get_value(sleep_modes, Desc),
+            Sleep = get_value(sleep, SleepModes),
+            ?assertEqual(<<16#10, 1, 16#01, 16#10, 16#C1, 0, 200>>,
+                get_value(enter, Sleep))
+        end),
+        ?_test(begin
+            {ok, Desc} = panel("good-display/gdep073e01"),
+            SleepModes = get_value(sleep_modes, Desc),
+            DeepSleep = get_value(deep_sleep, SleepModes),
+            ?assertEqual(
+                <<16#02, 1, 16#00, 16#01, 16#43, 1, 136, 19, 16#07, 1, 16#A5>>,
+                get_value(enter, DeepSleep)),
+            ?assertEqual(reset_init, get_value(wake, DeepSleep)),
+            ?assertEqual(full, get_value(after_wake_refresh, DeepSleep))
+        end),
+        ?_test(begin
+            CustomModes = [
+                {lab, [
+                    {enter, <<1, 2, 3>>},
+                    {wake, init},
+                    {controller_ram, unknown},
+                    {host_prev_frame, invalidate},
+                    {after_wake_refresh, full}
+                ]}
+            ],
+            {ok, Desc} = panel("waveshare,epd2in9_V2", #{sleep_modes => CustomModes}),
+            ?assertEqual(CustomModes, get_value(sleep_modes, Desc))
+        end),
+        ?_test(begin
+            DuplicateModes = [
+                {sleep, [{enter, <<1>>}]},
+                {sleep, [{enter, <<2>>}]}
+            ],
+            ?assertError({badmatch, false},
+                panel("waveshare,epd2in9_V2", #{sleep_modes => DuplicateModes}))
+        end),
+        ?_test(begin
+            TooManyModes = [
+                {mode1, [{enter, <<1>>}]},
+                {mode2, [{enter, <<2>>}]},
+                {mode3, [{enter, <<3>>}]},
+                {mode4, [{enter, <<4>>}]},
+                {mode5, [{enter, <<5>>}]},
+                {mode6, [{enter, <<6>>}]},
+                {mode7, [{enter, <<7>>}]},
+                {mode8, [{enter, <<8>>}]},
+                {mode9, [{enter, <<9>>}]}
+            ],
+            ?assertError({badmatch, false},
+                panel("waveshare,epd2in9_V2", #{sleep_modes => TooManyModes}))
         end)
     ].
 

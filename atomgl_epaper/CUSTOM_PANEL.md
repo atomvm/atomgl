@@ -66,10 +66,21 @@ descriptor(Opts) ->
             init => init(),
             full => full_refresh(),
             partial => partial_refresh(),
-            sleep => cmd(16#10, <<16#01>>),
+            sleep_modes => [
+                {sleep, [
+                    {enter, cmd(16#10, <<16#01>>)},
+                    {wake, reset_init},
+                    {controller_ram, unknown},
+                    {host_prev_frame, preserve},
+                    {after_wake_refresh, allow_if_program_reseeds}
+                ]}
+            ],
             lut_full => wf_full_1in54(),
             lut_partial => wf_partial_1in54()
         }, Opts)).
+
+%% `allow_if_program_reseeds` allows fast/partial after wake only when the
+%% selected refresh program includes insert_prev_frame/1.
 
 init() ->
     program([
