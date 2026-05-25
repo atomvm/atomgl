@@ -88,7 +88,42 @@ enum EPaperRefreshMode
     EPAPER_REFRESH_FULL,
     EPAPER_REFRESH_FAST,
     EPAPER_REFRESH_PARTIAL,
-    EPAPER_REFRESH_4GRAY
+    EPAPER_REFRESH_4GRAY,
+    EPAPER_REFRESH_MODE_COUNT
+};
+
+#define EPAPER_REFRESH_MODE_FULL (1U << EPAPER_REFRESH_FULL)
+#define EPAPER_REFRESH_MODE_FAST (1U << EPAPER_REFRESH_FAST)
+#define EPAPER_REFRESH_MODE_PARTIAL (1U << EPAPER_REFRESH_PARTIAL)
+#define EPAPER_REFRESH_MODE_4GRAY (1U << EPAPER_REFRESH_4GRAY)
+
+#define EPAPER_MAX_SLEEP_MODES 8
+
+enum EPaperControllerRamPolicy
+{
+    EPAPER_CONTROLLER_RAM_UNKNOWN,
+    EPAPER_CONTROLLER_RAM_RETAINED,
+    EPAPER_CONTROLLER_RAM_LOST
+};
+
+enum EPaperHostPrevFramePolicy
+{
+    EPAPER_HOST_PREV_FRAME_INVALIDATE,
+    EPAPER_HOST_PREV_FRAME_PRESERVE
+};
+
+enum EPaperAfterWakeRefreshPolicy
+{
+    EPAPER_AFTER_WAKE_REFRESH_FULL,
+    EPAPER_AFTER_WAKE_REFRESH_ALLOW,
+    EPAPER_AFTER_WAKE_REFRESH_ALLOW_IF_PROGRAM_RESEEDS
+};
+
+enum EPaperWakePolicy
+{
+    EPAPER_WAKE_INIT,
+    EPAPER_WAKE_RESET_INIT,
+    EPAPER_WAKE_PROGRAM
 };
 
 struct EPaperFrameLayout
@@ -96,6 +131,17 @@ struct EPaperFrameLayout
     enum EPaperByteOrder byte_order;
     enum EPaperBitOrder bit_order;
     enum EPaperPolarity polarity;
+};
+
+struct EPaperSleepMode
+{
+    uint32_t atom_index;
+    struct EPaperProgram enter;
+    struct EPaperProgram wake;
+    enum EPaperWakePolicy wake_policy;
+    enum EPaperControllerRamPolicy controller_ram;
+    enum EPaperHostPrevFramePolicy host_prev_frame;
+    enum EPaperAfterWakeRefreshPolicy after_wake_refresh;
 };
 
 // Captures every panel-specific knob so a single unified driver can
@@ -158,8 +204,9 @@ struct EPaperDesc
     struct EPaperProgram program_fast;
     struct EPaperProgram program_partial;
     struct EPaperProgram program_4gray;
-    struct EPaperProgram sleep;
-    struct EPaperProgram wake;
+    struct EPaperSleepMode sleep_modes[EPAPER_MAX_SLEEP_MODES];
+    int sleep_mode_count;
+    uint8_t refresh_mode_mask;
     struct EPaperLut lut_slots[EPAPER_MAX_LUT_SLOTS];
 
     // Timing & ghosting fields

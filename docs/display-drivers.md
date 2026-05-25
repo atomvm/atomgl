@@ -335,6 +335,7 @@ When calling `panel/2`, you can customize:
 - `orientation` - `:landscape`, `:landscape_left`, `:landscape_right`, `:portrait`, or `:portrait_flipped` (automatically maps native coordinates to view width/height and sets rotation). `:landscape` is a compatibility alias for `:landscape_left`.
 - `default_refresh` - The refresh mode used when no frame option is specified.
 - `refresh_modes` - List of allowed refresh modes (e.g., `[:full, :fast, :partial]`).
+- `sleep_modes` - Override the panel's low-power mode descriptors for experiments or panel-specific tuning.
 - `ghosting` - Map with ghosting settings:
   - `max_fast_refreshes` - Maximum successive fast updates before a full refresh is forced.
   - `reseed_on_timeout` - Reseed previous/current planes with full refresh after BUSY timeouts.
@@ -348,7 +349,7 @@ A completed descriptor is a keyword list with the following shape:
 
 ```elixir
 [
-  descriptor_version: 2,
+  descriptor_version: 3,
   name: "Waveshare epd2in9_V2 2.9\" e-paper SSD1680 v1",
   controller: :ssd16xx, # :ssd16xx, :jd79656, :uc8151, :uc8276, :uc8175, or :acep7
   native_width: 128,
@@ -370,9 +371,24 @@ A completed descriptor is a keyword list with the following shape:
     full: <<...>>,    # Full refresh waveform/cmd sequence
     fast: <<...>>,    # Fast refresh sequence (optional)
     partial: <<...>>, # Partial refresh sequence (optional)
-    sleep: <<...>>,   # Sleep command sequence (optional)
     "4gray": <<...>>  # 4-gray refresh sequence (optional)
   },
+  sleep_modes: [
+    sleep: [
+      enter: <<...>>,                         # Bytecode program to enter the mode
+      wake: :reset_init,                      # :init, :reset_init, or custom bytecode
+      controller_ram: :retained,              # :retained, :lost, or :unknown
+      host_prev_frame: :preserve,             # :preserve or :invalidate
+      after_wake_refresh: :allow_if_program_reseeds
+    ],
+    deep_sleep: [
+      enter: <<...>>,
+      wake: :reset_init,
+      controller_ram: :lost,
+      host_prev_frame: :preserve,
+      after_wake_refresh: :allow_if_program_reseeds
+    ]
+  ],
   init_seq: <<...>>,                   # ACeP color init sequence (optional for program descriptors)
   init_wait_busy_between_cmds: false,  # ACeP color init behavior
   frame_preamble_seq: <<...>>,         # ACeP color per-frame preamble (optional)
@@ -397,7 +413,7 @@ A completed descriptor is a keyword list with the following shape:
 ]
 ```
 
-Program-driven monochrome and 4-gray descriptors use the `programs` and LUT fields. ACeP 7-color descriptors use the palette and ACeP sequence fields (`init_seq`, `frame_preamble_seq`, and refresh settings) instead.
+Program-driven monochrome and 4-gray descriptors use the `programs` and LUT fields. ACeP 7-color descriptors use the palette and ACeP sequence fields (`init_seq`, `frame_preamble_seq`, and refresh settings) instead. Both styles can expose `sleep_modes`.
 
 #### Ghosting Policy
 
@@ -436,6 +452,47 @@ When sending updates via the port, you can dynamically choose the refresh mode p
 ```
 
 If the requested refresh mode is not listed in the descriptor's `refresh_modes`, the driver defaults back to `default_refresh`. Only modes defined and present in the descriptor are permitted.
+
+For slow displays, use `wait_idle` after an asynchronous `update` when the caller needs a queue barrier. It returns after earlier retained display messages have been processed, with `:ok` when the most recent executed update completed successfully and `:error` if the driver detected a failure.
+
+```elixir
+:port.call(display, {:update, items, [refresh: :partial]}, 5000)
+:port.call(display, {:wait_idle}, 30_000)
+```
+
+The e-paper port also exposes descriptor capabilities at runtime:
+
+```elixir
+:port.call(display, {:info}, 5000)
+# [
+#   controller: :ssd16xx,
+#   width: 296,
+#   height: 128,
+#   refresh_modes: [:full, :fast, :partial, :"4gray"],
+#   default_refresh: :full,
+#   sleep_modes: [:sleep, :deep_sleep],
+#   asleep: false
+# ]
+```
+
+#### Low Power Sleep
+
+Descriptors can expose up to 8 unique named low-power modes under `sleep_modes`. The built-in names are:
+
+- `:standby` - controller power-off/standby when the panel supports it.
+- `:sleep` - controller sleep mode intended to retain more internal state.
+- `:deep_sleep` - lowest-power controller mode; wake generally requires hardware reset.
+
+Use the mode explicitly:
+
+```elixir
+:port.call(display, {:sleep, :standby}, 5000)
+:port.call(display, {:sleep, :sleep}, 5000)
+:port.call(display, {:sleep, :deep_sleep}, 5000)
+:port.call(display, {:wake}, 5000)
+```
+
+If an update arrives while the controller is asleep, the driver wakes it first. `host_prev_frame` controls whether AtomGL keeps its own previous-frame buffer; `after_wake_refresh` controls whether a fast/partial update is allowed, forced to full, or allowed only when the selected bytecode program writes the saved previous frame back to controller RAM.
 
 ## Custom Initialization Sequences
 
