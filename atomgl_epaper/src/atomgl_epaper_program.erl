@@ -5,9 +5,13 @@
 
 -export([
     program/1,
+    init_seq/1,
     cmd/1,
     cmd/2,
     cmd_delay/3,
+    init_cmd/1,
+    init_cmd/2,
+    init_cmd_delay/3,
     wait_busy/2,
     reset/3,
     insert_plane/1,
@@ -22,6 +26,7 @@
 -define(DELAY, 16#80).
 -define(META, 16#40).
 -define(LEN_MASK, 16#3F).
+-define(INIT_LEN_MASK, 16#7F).
 
 -define(OP_WAIT_BUSY, 16#01).
 -define(OP_RESET, 16#02).
@@ -35,6 +40,9 @@
 program(Parts) ->
     iolist_to_binary(Parts).
 
+init_seq(Parts) ->
+    iolist_to_binary(Parts).
+
 cmd(Cmd) ->
     cmd(Cmd, <<>>).
 
@@ -44,6 +52,19 @@ cmd(Cmd, Data) when byte_size(Data) =< ?LEN_MASK ->
     <<Cmd, (byte_size(Data)), Data/binary>>.
 
 cmd_delay(Cmd, Data, DelayMs) when byte_size(Data) =< ?LEN_MASK ->
+    <<Cmd, (?DELAY bor byte_size(Data)), Data/binary, DelayMs>>.
+
+init_cmd(Cmd) ->
+    init_cmd(Cmd, <<>>).
+
+init_cmd(Cmd, Data) when is_list(Data) ->
+    init_cmd(Cmd, list_to_binary(Data));
+init_cmd(Cmd, Data) when byte_size(Data) =< ?INIT_LEN_MASK ->
+    <<Cmd, (byte_size(Data)), Data/binary>>.
+
+init_cmd_delay(Cmd, Data, DelayMs) when is_list(Data) ->
+    init_cmd_delay(Cmd, list_to_binary(Data), DelayMs);
+init_cmd_delay(Cmd, Data, DelayMs) when byte_size(Data) =< ?INIT_LEN_MASK ->
     <<Cmd, (?DELAY bor byte_size(Data)), Data/binary, DelayMs>>.
 
 wait_busy(Level, TimeoutMs) ->

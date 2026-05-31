@@ -43,14 +43,15 @@
 // 0x00, which is PSR on most Waveshare / GoodDisplay controllers.
 
 #define EPAPER_INIT_SEQ_DELAY 0x80
-
 // Execute an init sequence over an SPI+DC bus.  seq/seq_len describe
 // a byte array in the format documented above.  When
 // wait_busy_between_cmds is true, a busy-high poll is inserted after
 // each command (mirroring the Good Display / Waveshare convention of
 // "command completes when BUSY rises").  busy_gpio is ignored when
 // the flag is false.
-void epaper_execute_init_seq(struct SPIDCBus *bus, int busy_gpio,
+bool epaper_validate_init_seq(const uint8_t *seq, size_t seq_len);
+
+bool epaper_execute_init_seq(struct SPIDCBus *bus, int busy_gpio,
     const uint8_t *seq, size_t seq_len, bool wait_busy_between_cmds);
 
 // --- Per-panel descriptor ---

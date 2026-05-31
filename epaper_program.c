@@ -76,6 +76,88 @@ static bool epaper_run_meta_opcode(const struct EPaperProgramOps *ops,
     }
 }
 
+static bool epaper_validate_meta_opcode(uint8_t opcode, uint8_t len,
+    bool allow_render_ops)
+{
+    switch (opcode) {
+        case EPAPER_PROGRAM_WAIT_BUSY:
+        case EPAPER_PROGRAM_RESET:
+            return len == 3;
+
+        case EPAPER_PROGRAM_INSERT_LUT:
+            return len == 1;
+
+        case EPAPER_PROGRAM_INSERT_PLANE:
+        case EPAPER_PROGRAM_INSERT_PREV_FRAME:
+            return allow_render_ops && len == 1;
+
+        case EPAPER_PROGRAM_CAPTURE_FRAME:
+        case EPAPER_PROGRAM_MARK_PREV_VALID:
+            return allow_render_ops && len == 0;
+
+        case EPAPER_PROGRAM_LABEL:
+            return len == 1;
+
+        default:
+            return false;
+    }
+}
+
+bool epaper_validate_program(const struct EPaperProgram *program,
+    bool allow_render_ops)
+{
+    if (program == NULL || program->bytes == NULL) {
+        return true;
+    }
+    if (program->len > EPAPER_MAX_DESCRIPTOR_BINARY_LEN) {
+        return false;
+    }
+
+    const uint8_t *pc = program->bytes;
+    const uint8_t *end = program->bytes + program->len;
+    bool capture_pending = false;
+    bool capture_completed = false;
+    while (pc < end) {
+        if ((size_t) (end - pc) < 2) {
+            return false;
+        }
+
+        uint8_t opcode = *pc++;
+        uint8_t flags_len = *pc++;
+        uint8_t len = flags_len & EPAPER_PROGRAM_LEN_MASK;
+        if ((size_t) (end - pc) < len) {
+            return false;
+        }
+
+        if (flags_len & EPAPER_PROGRAM_META) {
+            if (!epaper_validate_meta_opcode(opcode, len, allow_render_ops)) {
+                return false;
+            }
+            if (opcode == EPAPER_PROGRAM_CAPTURE_FRAME) {
+                if (capture_pending) {
+                    return false;
+                }
+                capture_pending = true;
+            } else if (opcode == EPAPER_PROGRAM_INSERT_PLANE && capture_pending) {
+                capture_pending = false;
+                capture_completed = true;
+            } else if (opcode == EPAPER_PROGRAM_MARK_PREV_VALID && !capture_completed) {
+                return false;
+            }
+        }
+        pc += len;
+
+        if (flags_len & EPAPER_PROGRAM_DELAY) {
+            if (pc >= end) {
+                return false;
+            }
+            pc++;
+        }
+    }
+
+    return !capture_pending;
+}
+
 bool epaper_run_program(const struct EPaperProgram *program,
     const struct EPaperProgramOps *ops)
 {

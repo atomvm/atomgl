@@ -8,6 +8,11 @@ without adding a lookup string to AtomGL. Use `atomgl_epaper_descriptor` to
 build and validate the descriptor, and use `atomgl_epaper_program` to build the
 bytecode programs consumed by the C display driver.
 
+Descriptors are keyword/proplists all the way down. The validator checks scalar
+ranges, controller/layout compatibility, bytecode structure, sleep mode
+programs, and ACeP raw init sequences so malformed custom panels fail before the
+display port opens.
+
 Once the descriptor works on hardware, it can be copied into
 `atomgl_epaper/src/atomgl_epaper_panels.erl` with a public lookup string and a
 focused descriptor test.
@@ -231,6 +236,11 @@ Port = open_port({spawn, "display"}, [
 ```
 
 The GPIO numbers above are placeholders. Use the pins from your board wiring.
+
+For ACeP color panels, build `init_seq` and `frame_preamble_seq` with
+`atomgl_epaper_program:init_seq/1`, `init_cmd/1,2`, and `init_cmd_delay/3`.
+Those raw command sequences are separate from interpreted refresh/sleep
+bytecode and do not support `wait_busy/2`, `reset/3`, or render operations.
 
 ## Moving A Working Panel Into AtomGL
 
