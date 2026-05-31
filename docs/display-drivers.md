@@ -366,13 +366,13 @@ A completed descriptor is a keyword list with the following shape:
   default_refresh: :full,
   palette: :acep7,      # ACeP color descriptors use :acep7, :acep7c, or :gdep073e01
   palette_size: 7,
-  programs: %{
+  programs: [
     init: <<...>>,    # Init bytecode
     full: <<...>>,    # Full refresh waveform/cmd sequence
     fast: <<...>>,    # Fast refresh sequence (optional)
     partial: <<...>>, # Partial refresh sequence (optional)
     "4gray": <<...>>  # 4-gray refresh sequence (optional)
-  },
+  ],
   sleep_modes: [
     sleep: [
       enter: <<...>>,                         # Bytecode program to enter the mode
@@ -389,23 +389,23 @@ A completed descriptor is a keyword list with the following shape:
       after_wake_refresh: :allow_if_program_reseeds
     ]
   ],
-  init_seq: <<...>>,                   # ACeP color init sequence (optional for program descriptors)
+  init_seq: <<...>>,                   # ACeP raw init sequence
   init_wait_busy_between_cmds: false,  # ACeP color init behavior
   frame_preamble_seq: <<...>>,         # ACeP color per-frame preamble (optional)
   refresh_has_data: false,             # ACeP color refresh command behavior
   refresh_data_byte: 0,
   post_power_off_busy_level: 0,
   periodic_refresh_interval: 0,
-  timing: %{
+  timing: [
     full_expected_ms: 2000,
     fast_expected_ms: 500,
     poll_interval_ms: 50,
     timeout_ms: 5000
-  },
-  ghosting: %{
+  ],
+  ghosting: [
     max_fast_refreshes: 10,
     reseed_on_timeout: true
-  },
+  ],
   lut_full: <<...>>,    # Waveform LUT (optional)
   lut_partial: <<...>>, # Waveform LUT (optional)
   lut_4gray: <<...>>,   # Waveform LUT (optional)
@@ -413,7 +413,9 @@ A completed descriptor is a keyword list with the following shape:
 ]
 ```
 
-Program-driven monochrome and 4-gray descriptors use the `programs` and LUT fields. ACeP 7-color descriptors use the palette and ACeP sequence fields (`init_seq`, `frame_preamble_seq`, and refresh settings) instead. Both styles can expose `sleep_modes`.
+Program-driven monochrome and 4-gray descriptors use the `programs` and LUT fields. ACeP 7-color descriptors use the palette and ACeP raw sequence fields (`init_seq`, `frame_preamble_seq`, and refresh settings) instead. Both styles can expose `sleep_modes`. Descriptor nested fields are keyword lists/proplists; `panel/2` constructor options are maps.
+
+Use `atomgl_epaper_program:program/1` with `cmd`, `wait_busy`, `reset`, and render op helpers for interpreted descriptor bytecode. Use `init_seq/1`, `init_cmd/1,2`, and `init_cmd_delay/3` only for ACeP raw init and frame preamble sequences; raw sequences do not support bytecode meta operations.
 
 #### Ghosting Policy
 
@@ -453,14 +455,14 @@ When sending updates via the port, you can dynamically choose the refresh mode p
 
 If the requested refresh mode is not listed in the descriptor's `refresh_modes`, the driver defaults back to `default_refresh`. Only modes defined and present in the descriptor are permitted.
 
-For slow displays, use `wait_idle` after an asynchronous `update` when the caller needs a queue barrier. It returns after earlier retained display messages have been processed, with `:ok` when the most recent executed update completed successfully and `:error` if the driver detected a failure.
+For slow displays, use `wait_idle` after an asynchronous `update` when the caller needs a queue barrier. It returns after earlier retained display messages have been processed, with `:ok` when the most recent executed update completed successfully and `:error` if the driver detected a failure. If the display queue overflows, older pre-acked updates may be dropped before execution, so `wait_idle` reports the last update that actually ran.
 
 ```elixir
 :port.call(display, {:update, items, [refresh: :partial]}, 5000)
 :port.call(display, {:wait_idle}, 30_000)
 ```
 
-The e-paper port also exposes descriptor capabilities at runtime:
+The e-paper port also exposes descriptor capabilities at runtime via `{:info}` or the `{:capabilities}` alias:
 
 ```elixir
 :port.call(display, {:info}, 5000)
@@ -468,6 +470,10 @@ The e-paper port also exposes descriptor capabilities at runtime:
 #   controller: :ssd16xx,
 #   width: 296,
 #   height: 128,
+#   native_width: 128,
+#   native_height: 296,
+#   rotation: 90,
+#   palette_size: 4,
 #   refresh_modes: [:full, :fast, :partial, :"4gray"],
 #   default_refresh: :full,
 #   sleep_modes: [:sleep, :deep_sleep],

@@ -30,6 +30,7 @@
 #define EPAPER_PROGRAM_DELAY 0x80
 #define EPAPER_PROGRAM_META 0x40
 #define EPAPER_PROGRAM_LEN_MASK 0x3F
+#define EPAPER_MAX_DESCRIPTOR_BINARY_LEN 4096
 
 enum EPaperProgramOpcode
 {
@@ -81,5 +82,7 @@ struct EPaperProgramOps
 
 bool epaper_run_program(const struct EPaperProgram *program,
     const struct EPaperProgramOps *ops);
+bool epaper_validate_program(const struct EPaperProgram *program,
+    bool allow_render_ops);
 
 #endif

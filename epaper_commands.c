@@ -37,20 +37,57 @@ static TickType_t delay_ms_to_ticks(uint32_t delay_ms)
     return (delay_ms + portTICK_PERIOD_MS - 1) / portTICK_PERIOD_MS;
 }
 
-void epaper_execute_init_seq(struct SPIDCBus *bus, int busy_gpio,
-    const uint8_t *seq, size_t seq_len, bool wait_busy_between_cmds)
+bool epaper_validate_init_seq(const uint8_t *seq, size_t seq_len)
 {
-    const uint8_t *end = seq + seq_len;
-    while (seq < end) {
-        uint8_t cmd = *seq++;
-        uint8_t flags_len = *seq++;
+    if (seq == NULL) {
+        return seq_len == 0;
+    }
+    if (seq_len > EPAPER_MAX_DESCRIPTOR_BINARY_LEN) {
+        return false;
+    }
+
+    size_t pos = 0;
+    while (pos < seq_len) {
+        if (seq_len - pos < 2) {
+            return false;
+        }
+        pos++;
+        uint8_t flags_len = seq[pos++];
         uint8_t len = flags_len & 0x7F;
 
-        spi_dc_write_cmd_data(bus, cmd, seq, len);
-        seq += len;
+        if (seq_len - pos < len) {
+            return false;
+        }
+        pos += len;
 
         if (flags_len & EPAPER_INIT_SEQ_DELAY) {
-            uint8_t delay_ms = *seq++;
+            if (seq_len - pos < 1) {
+                return false;
+            }
+            pos++;
+        }
+    }
+    return true;
+}
+
+bool epaper_execute_init_seq(struct SPIDCBus *bus, int busy_gpio,
+    const uint8_t *seq, size_t seq_len, bool wait_busy_between_cmds)
+{
+    if (!epaper_validate_init_seq(seq, seq_len)) {
+        return false;
+    }
+
+    size_t pos = 0;
+    while (pos < seq_len) {
+        uint8_t cmd = seq[pos++];
+        uint8_t flags_len = seq[pos++];
+        uint8_t len = flags_len & 0x7F;
+
+        spi_dc_write_cmd_data(bus, cmd, seq + pos, len);
+        pos += len;
+
+        if (flags_len & EPAPER_INIT_SEQ_DELAY) {
+            uint8_t delay_ms = seq[pos++];
             if (delay_ms > 0) {
                 vTaskDelay(delay_ms_to_ticks(delay_ms));
             }
@@ -60,4 +97,6 @@ void epaper_execute_init_seq(struct SPIDCBus *bus, int busy_gpio,
             wait_busy_high(busy_gpio);
         }
     }
+
+    return true;
 }

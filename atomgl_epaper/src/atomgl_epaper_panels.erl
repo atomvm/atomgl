@@ -17,9 +17,12 @@
 
 -import(atomgl_epaper_program, [
     program/1,
+    init_seq/1,
     cmd/1,
     cmd/2,
-    cmd_delay/3,
+    init_cmd/1,
+    init_cmd/2,
+    init_cmd_delay/3,
     wait_busy/2,
     reset/3,
     insert_plane/1,
@@ -60,7 +63,7 @@ panel("waveshare,epd2in9_V2", Opts) ->
         default_refresh => full,
         init => epd2in9_v2_init(none),
         full => epd2in9_v2_refresh(?LUT_FULL, 16#C7),
-        fast => epd2in9_v2_refresh(?LUT_FAST, 16#C7),
+        fast => epd2in9_v2_fast_refresh(),
         partial => epd2in9_v2_partial_refresh(),
         '4gray' => epd2in9_v2_4gray_refresh(),
         sleep_modes => ssd16xx_sleep_modes(100),
@@ -108,7 +111,7 @@ panel("waveshare,epd2in13_V4", Opts) ->
         default_refresh => full,
         init => epd2in13_v4_init(),
         full => epd2in13_v4_refresh(16#F7),
-        fast => epd2in13_v4_refresh(16#C7),
+        fast => epd2in13_v4_fast_refresh(),
         partial => epd2in13_v4_partial_refresh(),
         sleep_modes => ssd16xx_sleep_modes(100)
     }, Opts));
@@ -125,7 +128,7 @@ panel("waveshare,epd4in2_V2", Opts) ->
         default_refresh => full,
         init => uc8276_init(),
         full => uc8276_refresh(uc8276_mono_prelude(), 16#F7),
-        fast => uc8276_refresh(uc8276_fast_prelude(16#6E), 16#C7),
+        fast => uc8276_fast_refresh(16#6E),
         partial => uc8276_partial_refresh(),
         '4gray' => uc8276_4gray_refresh(),
         sleep_modes => controller_sleep_modes(sleep_program(200)),
@@ -141,6 +144,7 @@ panel("heltec,lcmen2r13efc1", Opts) ->
     jd79656_panel("Heltec LCMEN2R13EFC1 2.13\" e-paper JD79656 v1", maps:merge(#{
         native_width => 122,
         native_height => 250,
+        busy_idle_level => 1,
         refresh_modes => [full],
         default_refresh => full,
         init => heltec_lcmen2r13efc1_init(),
@@ -184,8 +188,8 @@ panel("good-display/gdep073e01", Opts) ->
         periodic_refresh_interval => 0,
         sleep_modes => acep7_sleep_modes(1, <<16#00>>)
     }, Opts));
-panel(_, _Opts) ->
-    error.
+panel(Compatible, _Opts) ->
+    {error, {unsupported_panel, Compatible}}.
 
 ssd16xx_sleep_modes(DelayMs) ->
     [
@@ -339,6 +343,21 @@ uc8276_refresh(Prelude, UpdateMode) ->
         mark_prev_valid()
     ]).
 
+uc8276_fast_refresh(Temperature) ->
+    program([
+        uc8276_fast_prelude(Temperature),
+        cmd(16#26),
+        insert_prev_frame(0),
+        uc8276_cursor(),
+        cmd(16#24),
+        capture_frame(),
+        insert_plane(0),
+        cmd(16#22, <<16#C7>>),
+        cmd(16#20),
+        wait_busy(0, 5000),
+        mark_prev_valid()
+    ]).
+
 uc8276_partial_refresh() ->
     program([
         cmd(16#3C, <<16#80>>),
@@ -447,6 +466,21 @@ epd2in13_v4_refresh(UpdateMode) ->
         mark_prev_valid()
     ]).
 
+epd2in13_v4_fast_refresh() ->
+    program([
+        epd2in13_v4_cursor(),
+        cmd(16#26),
+        insert_prev_frame(0),
+        epd2in13_v4_cursor(),
+        cmd(16#24),
+        capture_frame(),
+        insert_plane(0),
+        cmd(16#22, <<16#C7>>),
+        cmd(16#20),
+        wait_busy(0, 5000),
+        mark_prev_valid()
+    ]).
+
 epd2in13_v4_partial_refresh() ->
     program([
         reset(0, 1, 0),
@@ -508,42 +542,42 @@ heltec_lcmen2r13efc1_refresh() ->
 %% SPDX-SnippetEnd
 
 acep7c_init_seq() ->
-    program([
-        cmd(16#00, <<16#EF, 16#08>>),
-        cmd(16#01, <<16#37, 16#00, 16#23, 16#23>>),
-        cmd(16#03, <<16#00>>),
-        cmd(16#06, <<16#C7, 16#C7, 16#1D>>),
-        cmd(16#30, <<16#3C>>),
-        cmd(16#40, <<16#00>>),
-        cmd(16#50, <<16#3F>>),
-        cmd(16#60, <<16#22>>),
-        cmd(16#61, <<16#02, 16#58, 16#01, 16#C0>>),
-        cmd(16#E3, <<16#AA>>),
-        cmd_delay(16#82, <<16#80>>, 100),
-        cmd(16#50, <<16#37>>)
+    init_seq([
+        init_cmd(16#00, <<16#EF, 16#08>>),
+        init_cmd(16#01, <<16#37, 16#00, 16#23, 16#23>>),
+        init_cmd(16#03, <<16#00>>),
+        init_cmd(16#06, <<16#C7, 16#C7, 16#1D>>),
+        init_cmd(16#30, <<16#3C>>),
+        init_cmd(16#40, <<16#00>>),
+        init_cmd(16#50, <<16#3F>>),
+        init_cmd(16#60, <<16#22>>),
+        init_cmd(16#61, <<16#02, 16#58, 16#01, 16#C0>>),
+        init_cmd(16#E3, <<16#AA>>),
+        init_cmd_delay(16#82, <<16#80>>, 100),
+        init_cmd(16#50, <<16#37>>)
     ]).
 
 acep7c_frame_preamble_seq() ->
-    program([
-        cmd(16#61, <<16#02, 16#58, 16#01, 16#C0>>)
+    init_seq([
+        init_cmd(16#61, <<16#02, 16#58, 16#01, 16#C0>>)
     ]).
 
 gdep073e01_init_seq() ->
-    program([
-        cmd(16#AA, <<16#49, 16#55, 16#20, 16#08, 16#09, 16#18>>),
-        cmd(16#01, <<16#3F>>),
-        cmd(16#00, <<16#5F, 16#69>>),
-        cmd(16#03, <<16#00, 16#54, 16#00, 16#44>>),
-        cmd(16#05, <<16#40, 16#1F, 16#1F, 16#2C>>),
-        cmd(16#06, <<16#6F, 16#1F, 16#17, 16#49>>),
-        cmd(16#08, <<16#6F, 16#1F, 16#1F, 16#22>>),
-        cmd(16#30, <<16#00>>),
-        cmd(16#50, <<16#3F>>),
-        cmd(16#60, <<16#02, 16#00>>),
-        cmd(16#61, <<16#03, 16#20, 16#01, 16#E0>>),
-        cmd(16#84, <<16#01>>),
-        cmd(16#E3, <<16#2F>>),
-        cmd(16#04)
+    init_seq([
+        init_cmd(16#AA, <<16#49, 16#55, 16#20, 16#08, 16#09, 16#18>>),
+        init_cmd(16#01, <<16#3F>>),
+        init_cmd(16#00, <<16#5F, 16#69>>),
+        init_cmd(16#03, <<16#00, 16#54, 16#00, 16#44>>),
+        init_cmd(16#05, <<16#40, 16#1F, 16#1F, 16#2C>>),
+        init_cmd(16#06, <<16#6F, 16#1F, 16#17, 16#49>>),
+        init_cmd(16#08, <<16#6F, 16#1F, 16#1F, 16#22>>),
+        init_cmd(16#30, <<16#00>>),
+        init_cmd(16#50, <<16#3F>>),
+        init_cmd(16#60, <<16#02, 16#00>>),
+        init_cmd(16#61, <<16#03, 16#20, 16#01, 16#E0>>),
+        init_cmd(16#84, <<16#01>>),
+        init_cmd(16#E3, <<16#2F>>),
+        init_cmd(16#04)
     ]).
 
 epd2in9_v2_init(BorderWaveform) ->
@@ -579,6 +613,23 @@ epd2in9_v2_refresh(LutSlot, UpdateMode) ->
         cmd(16#26),
         insert_prev_frame(0),
         cmd(16#22, <<UpdateMode>>),
+        cmd(16#20),
+        wait_busy(0, 5000),
+        mark_prev_valid()
+    ]).
+
+epd2in9_v2_fast_refresh() ->
+    program([
+        insert_lut(?LUT_FAST),
+        set_ram_cursor(),
+        cmd(16#26),
+        insert_prev_frame(0),
+        delay_ms(2),
+        set_ram_cursor(),
+        cmd(16#24),
+        capture_frame(),
+        insert_plane(0),
+        cmd(16#22, <<16#C7>>),
         cmd(16#20),
         wait_busy(0, 5000),
         mark_prev_valid()
