@@ -326,6 +326,8 @@ These sequences are highly specific to each display model and typically come fro
 
 RGB LCD panels driven through the ESP32-S3 RGB LCD peripheral. Requires ESP-IDF 5 or later.
 
+Developed and tested on the **Waveshare ESP32-S3 7-inch RGB Touch LCD** (800×480, 16-bit RGB565 parallel interface).
+
 **Compatible strings:** `"esp_lcd,rgb"` or `"waveshare,esp32-s3-touch-lcd-7"`
 
 | Option | Type | Description | Default |
