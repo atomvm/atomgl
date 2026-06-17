@@ -88,6 +88,8 @@ software dithering
 * `sharp,memory-lcd`: Sharp Memory LCDs - 400x240, 1-bit monochrome
 * `solomon-systech,ssd1306`: Solomon Systech SSD1306 - 128x64, 1-bit monochrome
 * `sino-wealth,sh1106`: Sino Wealth SH1106 - 128x64, 1-bit monochrome
+* `esp_lcd,rgb` / `waveshare,esp32-s3-touch-lcd-7`: RGB LCD panels using the ESP32-S3 LCD peripheral,
+requires ESP-IDF 5 or later, 16-bit colors (RGB565)
 
 [SDL Linux display](sdl_display/) is also supported and can be built as an AtomVM plugin.
 
