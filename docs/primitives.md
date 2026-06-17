@@ -25,6 +25,11 @@ The `transparent` atom indicates that no background is drawn for the item's boun
 allowing the item to be properly rendered over lower items in the display list. This may have
 performance implications.
 
+Anti-aliased uFont text with a transparent background is composited against the display list:
+partial-alpha glyph edge pixels blend with the resolved colour from the next lower opaque item
+rather than against framebuffer memory. This produces smooth anti-aliased text on any
+background, provided a solid rectangle exists below it in the display list.
+
 ### Text
 Text can be provided as either an Erlang string (a list) or an Elixir string (a binary). UTF-8
 encoding is supported.

@@ -322,6 +322,88 @@ Each entry can be:
 
 These sequences are highly specific to each display model and typically come from the manufacturer's datasheet or reference implementation.
 
+### RGB LCD Panels (esp_lcd,rgb)
+
+RGB LCD panels driven through the ESP32-S3 RGB LCD peripheral. Requires ESP-IDF 5 or later.
+
+**Compatible strings:** `"esp_lcd,rgb"` or `"waveshare,esp32-s3-touch-lcd-7"`
+
+| Option | Type | Description | Default |
+|--------|------|-------------|---------|
+| `width` | integer | Display width in pixels | 800 |
+| `height` | integer | Display height in pixels | 480 |
+| `pclk_hz` | integer | Pixel clock frequency | 16_000_000 |
+| `hsync_pulse_width` | integer | HSYNC pulse width | 4 |
+| `hsync_back_porch` | integer | HSYNC back porch | 8 |
+| `hsync_front_porch` | integer | HSYNC front porch | 8 |
+| `vsync_pulse_width` | integer | VSYNC pulse width | 4 |
+| `vsync_back_porch` | integer | VSYNC back porch | 8 |
+| `vsync_front_porch` | integer | VSYNC front porch | 8 |
+| `hsync_gpio` | integer | HSYNC GPIO pin | 46 |
+| `vsync_gpio` | integer | VSYNC GPIO pin | 3 |
+| `de_gpio` | integer | Data enable GPIO pin | 5 |
+| `pclk_gpio` | integer | Pixel clock GPIO pin | 7 |
+| `data_gpios` | list of 16 integers | Data GPIO pins (R0–R4, G0–G5, B0–B4) | Required |
+| `bounce_buffer_size_px` | integer | DMA bounce buffer size | 8000 |
+| `pclk_active_neg` | boolean | PCLK active on negative edge | true |
+| `fb_in_psram` | boolean | Place framebuffers in PSRAM | true |
+
+The RGB LCD driver supports double framebuffering in PSRAM when available for
+tear-free rendering. It provides the standard `update` and `update_region` port
+commands, plus `draw_rgb565_raw` for direct RGB565 binary frame delivery.
+
+**Example:**
+```elixir
+rgb_lcd_opts = [
+  compatible: "esp_lcd,rgb",
+  width: 800,
+  height: 480,
+  pclk_hz: 16_000_000,
+  hsync_pulse_width: 4,
+  hsync_back_porch: 8,
+  hsync_front_porch: 8,
+  vsync_pulse_width: 4,
+  vsync_back_porch: 8,
+  vsync_front_porch: 8,
+  hsync_gpio: 46,
+  vsync_gpio: 3,
+  de_gpio: 5,
+  pclk_gpio: 7,
+  data_gpios: [10, 9, 46, 3, 18, 8, 17, 16, 15, 47, 48, 45, 42, 6, 1, 2],
+  bounce_buffer_size_px: 8000,
+  pclk_active_neg: true,
+  fb_in_psram: true
+]
+```
+
+## Region Updates and Raw Drawing
+
+In addition to full-screen `update`, the following port commands are available on
+supported drivers:
+
+### update_region
+
+Partially updates a rectangular region of the display without redrawing the entire
+screen. Useful for incremental UI updates like progress bars or dynamic text fields
+where a full-screen redraw is unnecessary.
+
+```elixir
+# Update only a 200×100 region at (50, 40)
+:port.call(display, {:update_region, x, y, width, height, display_list}, 500)
+```
+
+### draw_rgb565_raw
+
+Draws raw RGB565 binary pixel data directly to the display. Each pixel is 2 bytes
+in little-endian RGB565 format. The binary must contain exactly `width × height × 2`
+bytes.
+
+```elixir
+# Draw a 100×100 pre-formatted RGB565 image at (10, 10)
+rgb565_binary = <<...>>
+:port.call(display, {:draw_rgb565_raw, 10, 10, 100, 100, rgb565_binary}, 5000)
+```
+
 ## Updating the Display
 
 Once configured, update the display using the display port:
