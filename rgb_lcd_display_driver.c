@@ -518,8 +518,16 @@ static void do_update_region(Context *ctx, int x0, int y0, int width, int height
 
     if (driver->framebuffer_count > 1) {
         int work_fb = select_work_framebuffer(driver);
-        if (work_fb >= 0
-                && render_items_to_framebuffer(driver, work_fb, x0, y0, width, height, items, len)) {
+        if (work_fb >= 0) {
+            // Copy entire active framebuffer to the work buffer so content
+            // outside the updated region (e.g. cover image drawn via
+            // draw_rgb565_raw) is preserved across framebuffer switches.
+            uint16_t *active_fb = active_framebuffer(driver);
+            if (active_fb) {
+                size_t fb_bytes = (size_t) driver->screen.w * (size_t) driver->screen.h * sizeof(uint16_t);
+                memcpy(driver->framebuffers[work_fb], active_fb, fb_bytes);
+            }
+            if (render_items_to_framebuffer(driver, work_fb, x0, y0, width, height, items, len)) {
             esp_err_t err = switch_to_framebuffer(driver, work_fb);
             if (err != ESP_OK) {
                 ESP_LOGE(TAG, "region framebuffer switch failed: %s", esp_err_to_name(err));
@@ -710,6 +718,11 @@ static void do_draw_rgb565_rle_base64_scaled(
                 ESP_LOGE(TAG, "cover framebuffer select failed.");
                 return;
             }
+            uint16_t *active_fb = active_framebuffer(driver);
+            if (active_fb) {
+                size_t fb_bytes = (size_t) driver->screen.w * (size_t) driver->screen.h * sizeof(uint16_t);
+                memcpy(driver->framebuffers[work_fb], active_fb, fb_bytes);
+            }
             copy_rgb565_region_to_framebuffer(driver, work_fb, x, y, draw_width, draw_height, draw_pixels);
             esp_err_t err = switch_to_framebuffer(driver, work_fb);
             if (err != ESP_OK) {
@@ -826,6 +839,13 @@ static void process_message(Message *message, Context *ctx)
             if (work_fb < 0) {
                 ESP_LOGE(TAG, "draw_rgb565_raw: framebuffer select failed.");
                 return;
+            }
+            // Copy full active framebuffer to work buffer so the rest of
+            // the screen (info, progress, controls) is preserved.
+            uint16_t *active_fb = active_framebuffer(driver);
+            if (active_fb) {
+                size_t fb_bytes = (size_t) driver->screen.w * (size_t) driver->screen.h * sizeof(uint16_t);
+                memcpy(driver->framebuffers[work_fb], active_fb, fb_bytes);
             }
             copy_rgb565_region_to_framebuffer(driver, work_fb, x, y, width, height, (const uint16_t *) raw);
             esp_err_t err = switch_to_framebuffer(driver, work_fb);
