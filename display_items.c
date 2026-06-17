@@ -51,8 +51,8 @@ void epd_draw_pixel(int xpos, int ypos, uint8_t color, void *buffer)
         return;
     }
 
-    uint32_t *pixel = (uint32_t *) (((uint8_t *) surface->buffer)
-            + (surface->width * ypos + xpos) * sizeof(uint32_t));
+    uint8_t *pixel = ((uint8_t *) surface->buffer)
+            + (surface->width * ypos + xpos) * sizeof(uint32_t);
 
     // The `color` parameter is the LUT-mapped glyph value from
     // draw_char: 0 = full foreground (fg_color=0 in default props),
@@ -60,7 +60,10 @@ void epd_draw_pixel(int xpos, int ypos, uint8_t color, void *buffer)
     // the foreground RGB on transparent with anti-aliased alpha
     // derived from the inverted grayscale.
     uint8_t alpha = (15 - (color >> 4)) * 17;
-    *pixel = ((uint32_t) alpha << 24) | (surface->fg_color & 0x00FFFFFFu);
+    pixel[0] = (surface->fg_color >> 24) & 0xFFu;
+    pixel[1] = (surface->fg_color >> 16) & 0xFFu;
+    pixel[2] = (surface->fg_color >> 8) & 0xFFu;
+    pixel[3] = alpha;
 }
 #endif /* ENABLE_UFONT */
 
