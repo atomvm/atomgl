@@ -55,7 +55,7 @@ int dcs_lcd_draw_image_x(const struct DCSLCDScreen *screen,
     uint16_t bgcolor = 0;
     bool visible_bg;
     if (item->brcolor != 0) {
-        bgcolor = rgba8888_color_to_rgb565(item->brcolor);
+        bgcolor = display_color_to_rgb565(item->brcolor);
         visible_bg = true;
     } else {
         visible_bg = false;
@@ -98,7 +98,7 @@ int dcs_lcd_draw_rect_x(const struct DCSLCDScreen *screen,
 {
     int x = item->x;
     int width = item->width;
-    uint16_t color = uint32_color_to_surface(item->brcolor);
+    uint16_t color = display_color_to_surface(item->brcolor);
 
     int drawn_pixels = 0;
 
@@ -121,11 +121,11 @@ int dcs_lcd_draw_text_x(const struct DCSLCDScreen *screen,
 {
     int x = item->x;
     int y = item->y;
-    uint16_t fgcolor = uint32_color_to_surface(item->data.text_data.fgcolor);
+    uint16_t fgcolor = display_color_to_surface(item->data.text_data.fgcolor);
     uint16_t bgcolor;
     bool visible_bg;
     if (item->brcolor != 0) {
-        bgcolor = uint32_color_to_surface(item->brcolor);
+        bgcolor = display_color_to_surface(item->brcolor);
         visible_bg = true;
     } else {
         visible_bg = false;
@@ -180,7 +180,7 @@ int dcs_lcd_draw_scaled_cropped_img_x(const struct DCSLCDScreen *screen,
     uint16_t bgcolor = 0;
     bool visible_bg;
     if (item->brcolor != 0) {
-        bgcolor = rgba8888_color_to_rgb565(item->brcolor);
+        bgcolor = display_color_to_rgb565(item->brcolor);
         visible_bg = true;
     } else {
         visible_bg = false;
