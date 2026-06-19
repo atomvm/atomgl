@@ -43,20 +43,16 @@ static inline uint8_t rgba8888_get_alpha(uint32_t color)
 
 static inline uint16_t rgba8888_color_to_rgb565(uint32_t color)
 {
-    uint8_t r = (color >> 24) & 0xFF;
-    uint8_t g = (color >> 16) & 0xFF;
-    uint8_t b = (color >> 8) & 0xFF;
+    uint8_t r = color >> 24;
+    uint8_t g = color >> 16;
+    uint8_t b = color >> 8;
 
     return (((uint16_t) (r >> 3)) << 11) | (((uint16_t) (g >> 2)) << 5) | ((uint16_t) b >> 3);
 }
 
 static inline uint16_t display_color_to_rgb565(uint32_t color)
 {
-    uint8_t r = (color >> 24) & 0xFF;
-    uint8_t g = (color >> 16) & 0xFF;
-    uint8_t b = (color >> 8) & 0xFF;
-
-    return (((uint16_t) (r >> 3)) << 11) | (((uint16_t) (g >> 2)) << 5) | ((uint16_t) b >> 3);
+    return rgba8888_color_to_rgb565(color);
 }
 
 static inline uint16_t rgb565_color_to_surface(uint16_t color16)

@@ -35,9 +35,8 @@ struct Surface
     int width;
     int height;
     void *buffer;
-    uint32_t fg_color; // RGBA8888 little-endian byte order with the
-                       // alpha byte cleared; ORed with the per-pixel
-                       // alpha in epd_draw_pixel.
+    uint32_t fg_color; // RGB bytes in 0x00BBGGRR order; alpha is cleared
+                       // so epd_draw_pixel can append per-pixel alpha.
 };
 
 #define BPP 4

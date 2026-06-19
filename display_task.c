@@ -49,6 +49,8 @@ static bool try_pre_ack_render_cmd(Message *message, Context *ctx)
     if (cmd != globalcontext_make_atom(ctx->global, "\x6" "update")
             && cmd != globalcontext_make_atom(ctx->global, "\xD" "update_region")
             && cmd != globalcontext_make_atom(ctx->global, "\xF" "draw_rgb565_raw")
+            && cmd != globalcontext_make_atom(ctx->global, "\x16" "draw_rgb565_rle_base64")
+            && cmd != globalcontext_make_atom(ctx->global, "\x1D" "draw_rgb565_rle_base64_scaled")
             && cmd != globalcontext_make_atom(ctx->global,
                     "\xB" "draw_buffer")) {
         return false;

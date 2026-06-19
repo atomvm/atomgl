@@ -2,6 +2,7 @@
  * This file is part of AtomGL.
  *
  * Copyright 2026 AtomGL contributors
+ * Copyright 2026 Ibrahim YILMAZ <ibrahim@drlinux.org>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -528,11 +529,12 @@ static void do_update_region(Context *ctx, int x0, int y0, int width, int height
                 memcpy(driver->framebuffers[work_fb], active_fb, fb_bytes);
             }
             if (render_items_to_framebuffer(driver, work_fb, x0, y0, width, height, items, len)) {
-            esp_err_t err = switch_to_framebuffer(driver, work_fb);
-            if (err != ESP_OK) {
-                ESP_LOGE(TAG, "region framebuffer switch failed: %s", esp_err_to_name(err));
-            } else {
-                mirror_region_from_active_to_inactive_framebuffers(driver, x0, y0, width, height);
+                esp_err_t err = switch_to_framebuffer(driver, work_fb);
+                if (err != ESP_OK) {
+                    ESP_LOGE(TAG, "region framebuffer switch failed: %s", esp_err_to_name(err));
+                } else {
+                    mirror_region_from_active_to_inactive_framebuffers(driver, x0, y0, width, height);
+                }
             }
         }
         display_items_delete(items, len);

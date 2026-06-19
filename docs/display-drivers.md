@@ -386,8 +386,9 @@ supported drivers:
 ### update_region
 
 Partially updates a rectangular region of the display without redrawing the entire
-screen. Useful for incremental UI updates like progress bars or dynamic text fields
-where a full-screen redraw is unnecessary.
+screen. This is a compatibility workaround for partial refreshes until a richer
+display-list damage tracker is available. It is useful for incremental UI updates
+like progress bars or dynamic text fields where a full-screen redraw is unnecessary.
 
 ```elixir
 # Update only a 200×100 region at (50, 40)
@@ -398,7 +399,8 @@ where a full-screen redraw is unnecessary.
 
 Draws raw RGB565 binary pixel data directly to the display. Each pixel is 2 bytes
 in little-endian RGB565 format. The binary must contain exactly `width × height × 2`
-bytes.
+bytes. This is a low-level direct-buffer path for preformatted RGB565 data; the
+regular image tuple API remains the preferred route for encoded image assets.
 
 ```elixir
 # Draw a 100×100 pre-formatted RGB565 image at (10, 10)
