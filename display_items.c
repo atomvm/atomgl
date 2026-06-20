@@ -121,6 +121,15 @@ void display_items_init_item(BaseDisplayItem *item, term req, Context *ctx)
         item->x_scale = term_to_int(term_get_tuple_element(req, 8));
         item->y_scale = term_to_int(term_get_tuple_element(req, 9));
 
+        if (item->x_scale <= 0 || item->y_scale <= 0) {
+            fprintf(stderr, "scaled_cropped_image: scale factors must be > 0\n");
+            return;
+        }
+        if (item->source_x < 0 || item->source_y < 0) {
+            fprintf(stderr, "scaled_cropped_image: source offsets must be >= 0\n");
+            return;
+        }
+
         // 10th element is for opts, but right now no opts are supported
 
         term img = term_get_tuple_element(req, 11);
@@ -136,6 +145,12 @@ void display_items_init_item(BaseDisplayItem *item, term req, Context *ctx)
         item->data.image_data_with_size.width = term_to_int(term_get_tuple_element(img, 1));
         item->data.image_data_with_size.height = term_to_int(term_get_tuple_element(img, 2));
         item->data.image_data_with_size.pix = term_binary_data(term_get_tuple_element(img, 3));
+
+        if (item->source_x >= item->data.image_data_with_size.width
+                || item->source_y >= item->data.image_data_with_size.height) {
+            fprintf(stderr, "scaled_cropped_image: source offset outside image\n");
+            return;
+        }
 
     } else if (cmd == context_make_atom(ctx, "\x4"
                                              "rect")) {

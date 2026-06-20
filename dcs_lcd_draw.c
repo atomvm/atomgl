@@ -86,9 +86,20 @@ static bool dcs_lcd_scaled_image_pixel_rgb565(const struct DCSLCDScreen *screen,
 {
     int x = item->x;
     int y = item->y;
+    int img_width = item->data.image_data_with_size.width;
+    int img_height = item->data.image_data_with_size.height;
+
+    if (item->x_scale <= 0 || item->y_scale <= 0 || item->source_x < 0 || item->source_y < 0
+            || item->source_x >= img_width || item->source_y >= img_height) {
+        return false;
+    }
+
     int source_x = item->source_x + ((xpos - x) / item->x_scale);
     int source_y = item->source_y + ((ypos - y) / item->y_scale);
-    int img_width = item->data.image_data_with_size.width;
+    if (source_x < 0 || source_y < 0 || source_x >= img_width || source_y >= img_height) {
+        return false;
+    }
+
     uint32_t *pixels = ((uint32_t *) item->data.image_data_with_size.pix) + (source_y * img_width) + source_x;
     uint32_t img_pixel = READ_32_UNALIGNED(pixels);
     uint8_t alpha = rgba8888_get_alpha(img_pixel);
@@ -334,22 +345,37 @@ int dcs_lcd_draw_scaled_cropped_img_x(const struct DCSLCDScreen *screen,
     int y_scale = item->y_scale;
     int x_scale = item->x_scale;
     int img_width = item->data.image_data_with_size.width;
+    int img_height = item->data.image_data_with_size.height;
 
-    int source_x = item->source_x;
-    int source_y = item->source_y;
+    if (x_scale <= 0 || y_scale <= 0 || item->source_x < 0 || item->source_y < 0
+            || item->source_x >= img_width || item->source_y >= img_height) {
+        return 0;
+    }
 
-    uint32_t *pixels = ((uint32_t *) data) + (source_y + ((ypos - y) / y_scale)) * img_width + source_x + ((xpos - x) / x_scale);
-    uint16_t *pixmem16 = (uint16_t *) (((uint8_t *) screen->pixels) + xpos * sizeof(uint16_t));
-
-    if (source_x + (width / x_scale) > img_width) {
-        width = (img_width - source_x) * x_scale;
+    if (item->source_x + (width / x_scale) > img_width) {
+        width = (img_width - item->source_x) * x_scale;
     }
 
     if (width > xpos - x + max_line_len) {
         width = xpos - x + max_line_len;
     }
 
-    for (int j = xpos - x; j < width; j++) {
+    if (width <= 0) {
+        return 0;
+    }
+
+    int rel_y = ypos - y;
+    int rel_x = xpos - x;
+    int source_y = item->source_y + (rel_y / y_scale);
+    int source_x = item->source_x + (rel_x / x_scale);
+    if (source_y < 0 || source_y >= img_height || source_x < 0 || source_x >= img_width) {
+        return 0;
+    }
+
+    uint32_t *pixels = ((uint32_t *) data) + (source_y * img_width) + source_x;
+    uint16_t *pixmem16 = (uint16_t *) (((uint8_t *) screen->pixels) + xpos * sizeof(uint16_t));
+
+    for (int j = rel_x; j < width; j++) {
         uint32_t img_pixel = READ_32_UNALIGNED(pixels);
         uint8_t alpha = rgba8888_get_alpha(img_pixel);
         if (alpha == 0xFF) {
@@ -369,7 +395,14 @@ int dcs_lcd_draw_scaled_cropped_img_x(const struct DCSLCDScreen *screen,
             return drawn_pixels;
         }
         drawn_pixels++;
-        pixels = ((uint32_t *) data) + (source_y + ((ypos - y) / y_scale)) * img_width + source_x + ((j + 1) / x_scale);
+        int next_rel_x = j + 1;
+        int next_source_x = item->source_x + (next_rel_x / x_scale);
+        int next_source_y = item->source_y + (rel_y / y_scale);
+        if (next_source_x < 0 || next_source_x >= img_width
+                || next_source_y < 0 || next_source_y >= img_height) {
+            break;
+        }
+        pixels = ((uint32_t *) data) + (next_source_y * img_width) + next_source_x;
     }
 
     return drawn_pixels;
