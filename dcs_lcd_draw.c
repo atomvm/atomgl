@@ -235,7 +235,7 @@ int dcs_lcd_draw_image_x(const struct DCSLCDScreen *screen,
         visible_bg = false;
     }
 
-    uint32_t *pixels = ((uint32_t *) data) + (ypos - y) * width + (xpos - x);
+    uint32_t *pixels = ((uint32_t *) data) + (ypos - y) * item->width + (xpos - x);
 
     for (int j = xpos - x; j < width; j++) {
         uint32_t img_pixel = READ_32_UNALIGNED(pixels);
