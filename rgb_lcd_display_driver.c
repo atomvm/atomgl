@@ -883,6 +883,20 @@ static void process_message(Message *message, Context *ctx)
     END_WITH_STACK_HEAP(heap, ctx->global);
 }
 
+static void rgb_lcd_free_driver(struct RGBLCDDriver *driver, bool delete_panel)
+{
+    if (!driver) {
+        return;
+    }
+    if (delete_panel && driver->panel) {
+        esp_lcd_panel_del(driver->panel);
+    }
+    if (driver->screen.pixels) {
+        heap_caps_free(driver->screen.pixels);
+    }
+    free(driver);
+}
+
 static void display_init(Context *ctx, term opts)
 {
     struct RGBLCDDriver *driver = calloc(1, sizeof(struct RGBLCDDriver));
@@ -990,11 +1004,13 @@ static void display_init(Context *ctx, term opts)
     err = esp_lcd_panel_reset(driver->panel);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "panel reset failed: %s", esp_err_to_name(err));
+        rgb_lcd_free_driver(driver, true);
         return;
     }
     err = esp_lcd_panel_init(driver->panel);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "panel init failed: %s", esp_err_to_name(err));
+        rgb_lcd_free_driver(driver, true);
         return;
     }
 
