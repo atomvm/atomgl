@@ -67,6 +67,45 @@ void epd_draw_pixel(int xpos, int ypos, uint8_t color, void *buffer)
 }
 #endif /* ENABLE_UFONT */
 
+static bool parse_image_tuple(term img, Context *ctx, int *width, int *height, const char **pix, bool *rgb565_pixels)
+{
+    term format = term_get_tuple_element(img, 0);
+    *width = term_to_int(term_get_tuple_element(img, 1));
+    *height = term_to_int(term_get_tuple_element(img, 2));
+    term data_term = term_get_tuple_element(img, 3);
+
+    if (*width <= 0 || *height <= 0) {
+        fprintf(stderr, "invalid image dimensions: %ix%i\n", *width, *height);
+        return false;
+    }
+
+    size_t bytes_per_pixel;
+    if (format == context_make_atom(ctx, "\x8"
+                                         "rgba8888")) {
+        *rgb565_pixels = false;
+        bytes_per_pixel = 4;
+    } else if (format == context_make_atom(ctx, "\x6"
+                                                "rgb565")) {
+        *rgb565_pixels = true;
+        bytes_per_pixel = 2;
+    } else {
+        fprintf(stderr, "unsupported image format: ");
+        term_display(stderr, format, ctx);
+        fprintf(stderr, "\n");
+        return false;
+    }
+
+    size_t expected = (size_t) *width * (size_t) *height * bytes_per_pixel;
+    if (term_binary_size(data_term) < expected) {
+        fprintf(stderr, "image binary too small (%zu < %zu)\n",
+            term_binary_size(data_term), expected);
+        return false;
+    }
+
+    *pix = term_binary_data(data_term);
+    return true;
+}
+
 void display_items_init_item(BaseDisplayItem *item, term req, Context *ctx)
 {
     memset(item, 0, sizeof(*item));
@@ -89,17 +128,15 @@ void display_items_init_item(BaseDisplayItem *item, term req, Context *ctx)
 
         term img = term_get_tuple_element(req, 4);
 
-        term format = term_get_tuple_element(img, 0);
-        if (format != context_make_atom(ctx, "\x8"
-                                             "rgba8888")) {
-            fprintf(stderr, "unsupported image format: ");
-            term_display(stderr, format, ctx);
-            fprintf(stderr, "\n");
+        int width;
+        int height;
+        const char *pix;
+        if (!parse_image_tuple(img, ctx, &width, &height, &pix, &item->rgb565_pixels)) {
             return;
         }
-        item->width = term_to_int(term_get_tuple_element(img, 1));
-        item->height = term_to_int(term_get_tuple_element(img, 2));
-        item->data.image_data.pix = term_binary_data(term_get_tuple_element(img, 3));
+        item->width = width;
+        item->height = height;
+        item->data.image_data.pix = pix;
 
     } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x14", "scaled_cropped_image"))) {
         item->primitive = PrimitiveScaledCroppedImage;
@@ -134,17 +171,15 @@ void display_items_init_item(BaseDisplayItem *item, term req, Context *ctx)
 
         term img = term_get_tuple_element(req, 11);
 
-        term format = term_get_tuple_element(img, 0);
-        if (format != globalcontext_make_atom(ctx->global, "\x8"
-                                             "rgba8888")) {
-            fprintf(stderr, "unsupported image format: ");
-            term_display(stderr, format, ctx);
-            fprintf(stderr, "\n");
+        int img_width;
+        int img_height;
+        const char *pix;
+        if (!parse_image_tuple(img, ctx, &img_width, &img_height, &pix, &item->rgb565_pixels)) {
             return;
         }
-        item->data.image_data_with_size.width = term_to_int(term_get_tuple_element(img, 1));
-        item->data.image_data_with_size.height = term_to_int(term_get_tuple_element(img, 2));
-        item->data.image_data_with_size.pix = term_binary_data(term_get_tuple_element(img, 3));
+        item->data.image_data_with_size.width = img_width;
+        item->data.image_data_with_size.height = img_height;
+        item->data.image_data_with_size.pix = pix;
 
         if (item->source_x >= item->data.image_data_with_size.width
                 || item->source_y >= item->data.image_data_with_size.height) {

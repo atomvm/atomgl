@@ -82,6 +82,7 @@ struct BaseDisplayItem
     int y_scale;
 
     bool owns_data;
+    bool rgb565_pixels;
 };
 
 typedef struct BaseDisplayItem BaseDisplayItem;

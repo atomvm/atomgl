@@ -56,6 +56,14 @@ static bool dcs_lcd_image_pixel_rgb565(const struct DCSLCDScreen *screen,
     int y = item->y;
     int rel_x = xpos - x;
     int rel_y = ypos - y;
+
+    if (item->rgb565_pixels) {
+        const uint16_t *pixels = ((const uint16_t *) item->data.image_data.pix)
+            + (rel_y * item->width) + rel_x;
+        *out_color = pixels[0];
+        return true;
+    }
+
     uint32_t *pixels = ((uint32_t *) item->data.image_data.pix) + (rel_y * item->width) + rel_x;
     uint32_t img_pixel = READ_32_UNALIGNED(pixels);
     uint8_t alpha = rgba8888_get_alpha(img_pixel);
@@ -98,6 +106,13 @@ static bool dcs_lcd_scaled_image_pixel_rgb565(const struct DCSLCDScreen *screen,
     int source_y = item->source_y + ((ypos - y) / item->y_scale);
     if (source_x < 0 || source_y < 0 || source_x >= img_width || source_y >= img_height) {
         return false;
+    }
+
+    if (item->rgb565_pixels) {
+        const uint16_t *pixels16 = ((const uint16_t *) item->data.image_data_with_size.pix)
+            + (source_y * img_width) + source_x;
+        *out_color = pixels16[0];
+        return true;
     }
 
     uint32_t *pixels = ((uint32_t *) item->data.image_data_with_size.pix) + (source_y * img_width) + source_x;
@@ -191,6 +206,26 @@ int dcs_lcd_draw_image_x(const struct DCSLCDScreen *screen,
     int x = item->x;
     int y = item->y;
 
+    int width = item->width;
+    const char *data = item->data.image_data.pix;
+
+    int drawn_pixels = 0;
+
+    uint16_t *pixmem16 = (uint16_t *) (((uint8_t *) screen->pixels) + xpos * sizeof(uint16_t));
+
+    if (width > xpos - x + max_line_len) {
+        width = xpos - x + max_line_len;
+    }
+
+    if (item->rgb565_pixels) {
+        const uint16_t *pixels16 = ((const uint16_t *) data) + (ypos - y) * item->width + (xpos - x);
+        for (int j = xpos - x; j < width; j++) {
+            pixmem16[drawn_pixels] = rgb565_color_to_surface(pixels16[j]);
+            drawn_pixels++;
+        }
+        return drawn_pixels;
+    }
+
     uint16_t bgcolor = 0;
     bool visible_bg;
     if (item->brcolor != 0) {
@@ -200,17 +235,7 @@ int dcs_lcd_draw_image_x(const struct DCSLCDScreen *screen,
         visible_bg = false;
     }
 
-    int width = item->width;
-    const char *data = item->data.image_data.pix;
-
-    int drawn_pixels = 0;
-
     uint32_t *pixels = ((uint32_t *) data) + (ypos - y) * width + (xpos - x);
-    uint16_t *pixmem16 = (uint16_t *) (((uint8_t *) screen->pixels) + xpos * sizeof(uint16_t));
-
-    if (width > xpos - x + max_line_len) {
-        width = xpos - x + max_line_len;
-    }
 
     for (int j = xpos - x; j < width; j++) {
         uint32_t img_pixel = READ_32_UNALIGNED(pixels);
@@ -374,6 +399,21 @@ int dcs_lcd_draw_scaled_cropped_img_x(const struct DCSLCDScreen *screen,
 
     uint32_t *pixels = ((uint32_t *) data) + (source_y * img_width) + source_x;
     uint16_t *pixmem16 = (uint16_t *) (((uint8_t *) screen->pixels) + xpos * sizeof(uint16_t));
+
+    if (item->rgb565_pixels) {
+        const uint16_t *pixels16 = (const uint16_t *) data;
+        for (int j = rel_x; j < width; j++) {
+            int sample_x = item->source_x + (j / x_scale);
+            int sample_y = item->source_y + (rel_y / y_scale);
+            if (sample_x < 0 || sample_x >= img_width || sample_y < 0 || sample_y >= img_height) {
+                break;
+            }
+            const uint16_t *src = pixels16 + (sample_y * img_width) + sample_x;
+            pixmem16[drawn_pixels] = rgb565_color_to_surface(src[0]);
+            drawn_pixels++;
+        }
+        return drawn_pixels;
+    }
 
     for (int j = rel_x; j < width; j++) {
         uint32_t img_pixel = READ_32_UNALIGNED(pixels);
