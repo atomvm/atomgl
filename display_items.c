@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 #include <interop.h>
 
@@ -59,9 +60,9 @@ void epd_draw_pixel(int xpos, int ypos, uint8_t color, void *buffer)
     // the foreground RGB on transparent with anti-aliased alpha
     // derived from the inverted grayscale.
     uint8_t alpha = (15 - (color >> 4)) * 17;
-    pixel[0] = (surface->fg_color >> 24) & 0xFFu;
-    pixel[1] = (surface->fg_color >> 16) & 0xFFu;
-    pixel[2] = (surface->fg_color >> 8) & 0xFFu;
+    pixel[0] = surface->fg_color & 0xFFu;
+    pixel[1] = (surface->fg_color >> 8) & 0xFFu;
+    pixel[2] = (surface->fg_color >> 16) & 0xFFu;
     pixel[3] = alpha;
 }
 #endif /* ENABLE_UFONT */
@@ -199,14 +200,28 @@ void display_items_init_item(BaseDisplayItem *item, term req, Context *ctx)
             struct Surface surface;
             surface.width = rect.width;
             surface.height = rect.height;
-            surface.buffer = malloc(rect.width * rect.height * BPP);
+            if (rect.width <= 0 || rect.height <= 0) {
+                fprintf(stderr, "invalid ufont surface size (%ix%i)\n",
+                    rect.width, rect.height);
+                free(text);
+                return;
+            }
+            size_t pixel_count = (size_t) rect.width * (size_t) rect.height;
+            if (pixel_count > SIZE_MAX / BPP) {
+                fprintf(stderr, "ufont surface size overflow (%ix%i)\n",
+                    rect.width, rect.height);
+                free(text);
+                return;
+            }
+            size_t surface_bytes = pixel_count * BPP;
+            surface.buffer = malloc(surface_bytes);
             if (!surface.buffer) {
                 fprintf(stderr, "Failed to allocate ufont surface (%ix%i)\n",
                     rect.width, rect.height);
                 free(text);
                 return;
             }
-            memset(surface.buffer, 0, rect.width * rect.height * BPP);
+            memset(surface.buffer, 0, surface_bytes);
             // Convert Erlang fgcolor (0xRRGGBBAA) to RGBA8888 little-
             // endian byte order (R in low byte, alpha byte cleared) so
             // epd_draw_pixel can OR it with the per-pixel alpha.
