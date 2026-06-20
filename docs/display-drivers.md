@@ -352,7 +352,7 @@ Developed and tested on the **Waveshare ESP32-S3 7-inch RGB Touch LCD** (800×48
 
 The RGB LCD driver supports double framebuffering in PSRAM when available for
 tear-free rendering. It provides the standard `update` and `update_region` port
-commands, plus `draw_rgb565_raw` for direct RGB565 binary frame delivery.
+commands, plus `draw_buffer` for direct RGB565 buffer delivery from image tuples.
 
 **Example:**
 ```elixir
@@ -395,17 +395,16 @@ like progress bars or dynamic text fields where a full-screen redraw is unnecess
 :port.call(display, {:update_region, x, y, width, height, display_list}, 500)
 ```
 
-### draw_rgb565_raw
+### draw_buffer
 
-Draws raw RGB565 binary pixel data directly to the display. Each pixel is 2 bytes
-in little-endian RGB565 format. The binary must contain exactly `width × height × 2`
-bytes. This is a low-level direct-buffer path for preformatted RGB565 data; the
-regular image tuple API remains the preferred route for encoded image assets.
+Draws a preformatted RGB565 buffer already resident in memory. Each pixel is 2 bytes
+in little-endian RGB565 format. The buffer address is passed as two 32-bit integers
+(low and high halves). Use with image tuples such as `{:rgb565, width, height, binary}`
+after loading the buffer into device memory.
 
 ```elixir
 # Draw a 100×100 pre-formatted RGB565 image at (10, 10)
-rgb565_binary = <<...>>
-:port.call(display, {:draw_rgb565_raw, 10, 10, 100, 100, rgb565_binary}, 5000)
+:port.call(display, {:draw_buffer, 10, 10, 100, 100, addr_low, addr_high}, 5000)
 ```
 
 ## Updating the Display

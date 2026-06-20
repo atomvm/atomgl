@@ -101,6 +101,12 @@ The format tag indicates the pixel format. For example, `rgba8888` means:
 - Byte order: R, G, B, A
 - Each component is 8 bits
 
+`rgb565` means:
+- 16-bit RGB565 pixels
+- Byte order: little-endian
+- 2 bytes per pixel (`width × height × 2` bytes total)
+- Use with `draw_buffer` for direct framebuffer delivery on RGB LCD drivers
+
 **Important:** Width and height must exactly match the dimensions of the image data in the binary.
 Incorrect values will result in corrupted image display.
 
