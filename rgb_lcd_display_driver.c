@@ -522,7 +522,7 @@ static void do_update_region(Context *ctx, int x0, int y0, int width, int height
         if (work_fb >= 0) {
             // Copy entire active framebuffer to the work buffer so content
             // outside the updated region (e.g. cover image drawn via
-            // draw_rgb565_raw) is preserved across framebuffer switches.
+            // draw_buffer) is preserved across framebuffer switches.
             uint16_t *active_fb = active_framebuffer(driver);
             if (active_fb) {
                 size_t fb_bytes = (size_t) driver->screen.w * (size_t) driver->screen.h * sizeof(uint16_t);
@@ -753,6 +753,41 @@ static void do_draw_rgb565_rle_base64(Context *ctx, int x, int y, int width, int
     do_draw_rgb565_rle_base64_scaled(ctx, x, y, width, height, width, height, b64_term);
 }
 
+static void draw_rgb565_region(struct RGBLCDDriver *driver, int x, int y, int width, int height, const uint16_t *pixels)
+{
+    if (driver->framebuffer_count > 1) {
+        maybe_store_fullscreen_background(driver, x, y, width, height, pixels);
+        int work_fb = select_work_framebuffer(driver);
+        if (work_fb < 0) {
+            ESP_LOGE(TAG, "draw_rgb565_region: framebuffer select failed.");
+            return;
+        }
+        uint16_t *active_fb = active_framebuffer(driver);
+        if (active_fb) {
+            size_t fb_bytes = (size_t) driver->screen.w * (size_t) driver->screen.h * sizeof(uint16_t);
+            memcpy(driver->framebuffers[work_fb], active_fb, fb_bytes);
+        }
+        copy_rgb565_region_to_framebuffer(driver, work_fb, x, y, width, height, pixels);
+        esp_err_t err = switch_to_framebuffer(driver, work_fb);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "draw_rgb565_region: framebuffer switch failed: %s", esp_err_to_name(err));
+            return;
+        }
+        mirror_region_to_inactive_framebuffers(driver, x, y, width, height, pixels);
+    } else {
+        maybe_store_fullscreen_background(driver, x, y, width, height, pixels);
+        esp_err_t err = esp_lcd_panel_draw_bitmap(
+            driver->panel, x, y, x + width, y + height, pixels);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "draw_rgb565_region: draw_bitmap failed: %s", esp_err_to_name(err));
+            return;
+        }
+        mirror_region_to_inactive_framebuffers(driver, x, y, width, height, pixels);
+    }
+
+    ESP_LOGI(TAG, "draw_rgb565_region: %dx%d pixels at (%d,%d)", width, height, x, y);
+}
+
 static void process_message(Message *message, Context *ctx)
 {
     GenMessage gen_message;
@@ -807,67 +842,15 @@ static void process_message(Message *message, Context *ctx)
         int height = term_to_int(term_get_tuple_element(req, 4));
         unsigned long addr_low = term_to_int(term_get_tuple_element(req, 5));
         unsigned long addr_high = term_to_int(term_get_tuple_element(req, 6));
-        const void *data = (const void *) (addr_low | (addr_high << 16));
+        const uint16_t *data = (const uint16_t *) (addr_low | (addr_high << 16));
 
-        esp_lcd_panel_draw_bitmap(driver->panel, x, y, x + width, y + height, data);
-        return;
-
-    } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\xF", "draw_rgb565_raw"))) {
-        int x = term_to_int(term_get_tuple_element(req, 1));
-        int y = term_to_int(term_get_tuple_element(req, 2));
-        int width = term_to_int(term_get_tuple_element(req, 3));
-        int height = term_to_int(term_get_tuple_element(req, 4));
-        term pixels_term = term_get_tuple_element(req, 5);
-
-        if (!term_is_binary(pixels_term) || width <= 0 || height <= 0
-                || x < 0 || y < 0
+        if (!data || width <= 0 || height <= 0 || x < 0 || y < 0
                 || x + width > driver->screen.w || y + height > driver->screen.h) {
-            ESP_LOGE(TAG, "Invalid draw_rgb565_raw arguments.");
+            ESP_LOGE(TAG, "Invalid draw_buffer arguments.");
             return;
         }
 
-        size_t expected = (size_t) width * (size_t) height * 2;
-        const uint8_t *raw = (const uint8_t *) term_binary_data(pixels_term);
-        size_t raw_len = term_binary_size(pixels_term);
-
-        if (raw_len < expected) {
-            ESP_LOGE(TAG, "draw_rgb565_raw: data too small (%zu < %zu)", raw_len, expected);
-            return;
-        }
-
-        if (driver->framebuffer_count > 1) {
-            maybe_store_fullscreen_background(driver, x, y, width, height, (const uint16_t *) raw);
-            int work_fb = select_work_framebuffer(driver);
-            if (work_fb < 0) {
-                ESP_LOGE(TAG, "draw_rgb565_raw: framebuffer select failed.");
-                return;
-            }
-            // Copy full active framebuffer to work buffer so the rest of
-            // the screen (info, progress, controls) is preserved.
-            uint16_t *active_fb = active_framebuffer(driver);
-            if (active_fb) {
-                size_t fb_bytes = (size_t) driver->screen.w * (size_t) driver->screen.h * sizeof(uint16_t);
-                memcpy(driver->framebuffers[work_fb], active_fb, fb_bytes);
-            }
-            copy_rgb565_region_to_framebuffer(driver, work_fb, x, y, width, height, (const uint16_t *) raw);
-            esp_err_t err = switch_to_framebuffer(driver, work_fb);
-            if (err != ESP_OK) {
-                ESP_LOGE(TAG, "draw_rgb565_raw: framebuffer switch failed: %s", esp_err_to_name(err));
-                return;
-            }
-            mirror_region_to_inactive_framebuffers(driver, x, y, width, height, (const uint16_t *) raw);
-        } else {
-            maybe_store_fullscreen_background(driver, x, y, width, height, (const uint16_t *) raw);
-            esp_err_t err = esp_lcd_panel_draw_bitmap(
-                driver->panel, x, y, x + width, y + height, raw);
-            if (err != ESP_OK) {
-                ESP_LOGE(TAG, "draw_rgb565_raw: draw_bitmap failed: %s", esp_err_to_name(err));
-                return;
-            }
-            mirror_region_to_inactive_framebuffers(driver, x, y, width, height, (const uint16_t *) raw);
-        }
-
-        ESP_LOGI(TAG, "draw_rgb565_raw: %dx%d pixels at (%d,%d)", width, height, x, y);
+        draw_rgb565_region(driver, x, y, width, height, data);
         return;
     }
 
