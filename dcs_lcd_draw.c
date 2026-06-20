@@ -249,12 +249,13 @@ int dcs_lcd_draw_image_x(const struct DCSLCDScreen *screen,
             pixmem16[drawn_pixels] = rgb565_color_to_surface(blended);
         } else if (alpha > 0) {
             uint16_t color = rgba8888_color_to_rgb565(img_pixel);
-            uint16_t lower = 0;
-            (void) dcs_lcd_resolve_pixel_rgb565(screen, xpos + drawn_pixels, ypos, items, items_len, item_index + 1, &lower);
+            uint16_t lower = rgb565_color_to_surface(pixmem16[drawn_pixels]);
+            uint16_t resolved = 0;
+            if (dcs_lcd_resolve_pixel_rgb565(screen, xpos + drawn_pixels, ypos, items, items_len, item_index + 1, &resolved)) {
+                lower = resolved;
+            }
             uint16_t blended = alpha_blend_rgb565(color, lower, alpha);
             pixmem16[drawn_pixels] = rgb565_color_to_surface(blended);
-        } else {
-            return drawn_pixels;
         }
         drawn_pixels++;
         pixels++;
@@ -427,12 +428,13 @@ int dcs_lcd_draw_scaled_cropped_img_x(const struct DCSLCDScreen *screen,
             pixmem16[drawn_pixels] = rgb565_color_to_surface(blended);
         } else if (alpha > 0) {
             uint16_t color = rgba8888_color_to_rgb565(img_pixel);
-            uint16_t lower = 0;
-            (void) dcs_lcd_resolve_pixel_rgb565(screen, xpos + drawn_pixels, ypos, items, items_len, item_index + 1, &lower);
+            uint16_t lower = rgb565_color_to_surface(pixmem16[drawn_pixels]);
+            uint16_t resolved = 0;
+            if (dcs_lcd_resolve_pixel_rgb565(screen, xpos + drawn_pixels, ypos, items, items_len, item_index + 1, &resolved)) {
+                lower = resolved;
+            }
             uint16_t blended = alpha_blend_rgb565(color, lower, alpha);
             pixmem16[drawn_pixels] = rgb565_color_to_surface(blended);
-        } else {
-            return drawn_pixels;
         }
         drawn_pixels++;
         int next_rel_x = j + 1;

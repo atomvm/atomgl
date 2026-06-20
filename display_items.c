@@ -36,8 +36,7 @@ struct Surface
     int width;
     int height;
     void *buffer;
-    uint32_t fg_color; // RGB bytes in 0x00BBGGRR order; alpha is cleared
-                       // so epd_draw_pixel can append per-pixel alpha.
+    uint32_t fg_color; // 0xRRGGBBAA from Erlang color << 8 | 0xFF
 };
 
 #define BPP 4
@@ -60,9 +59,9 @@ void epd_draw_pixel(int xpos, int ypos, uint8_t color, void *buffer)
     // the foreground RGB on transparent with anti-aliased alpha
     // derived from the inverted grayscale.
     uint8_t alpha = (15 - (color >> 4)) * 17;
-    pixel[0] = surface->fg_color & 0xFFu;
-    pixel[1] = (surface->fg_color >> 8) & 0xFFu;
-    pixel[2] = (surface->fg_color >> 16) & 0xFFu;
+    pixel[0] = (surface->fg_color >> 24) & 0xFFu;
+    pixel[1] = (surface->fg_color >> 16) & 0xFFu;
+    pixel[2] = (surface->fg_color >> 8) & 0xFFu;
     pixel[3] = alpha;
 }
 #endif /* ENABLE_UFONT */
@@ -97,8 +96,8 @@ static bool parse_image_tuple(term img, Context *ctx, int *width, int *height, c
 
     size_t expected = (size_t) *width * (size_t) *height * bytes_per_pixel;
     if (term_binary_size(data_term) < expected) {
-        fprintf(stderr, "image binary too small (%zu < %zu)\n",
-            term_binary_size(data_term), expected);
+        fprintf(stderr, "image binary too small (%lu < %zu)\n",
+            (unsigned long) term_binary_size(data_term), expected);
         return false;
     }
 
@@ -272,12 +271,7 @@ void display_items_init_item(BaseDisplayItem *item, term req, Context *ctx)
                 return;
             }
             memset(surface.buffer, 0, surface_bytes);
-            // Convert Erlang fgcolor (0xRRGGBBAA) to RGBA8888 little-
-            // endian byte order (R in low byte, alpha byte cleared) so
-            // epd_draw_pixel can OR it with the per-pixel alpha.
-            surface.fg_color = ((fgcolor >> 24) & 0xFFu)
-                    | (((fgcolor >> 16) & 0xFFu) << 8)
-                    | (((fgcolor >> 8) & 0xFFu) << 16);
+            surface.fg_color = fgcolor;
             int text_x = 0;
             int text_y = loaded_font->ascender;
             enum EpdDrawError res = epd_write_default(loaded_font, text, &text_x, &text_y, &surface);

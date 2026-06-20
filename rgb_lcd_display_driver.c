@@ -753,6 +753,24 @@ static void do_draw_rgb565_rle_base64(Context *ctx, int x, int y, int width, int
     do_draw_rgb565_rle_base64_scaled(ctx, x, y, width, height, width, height, b64_term);
 }
 
+static void maybe_store_cover_background(
+    struct RGBLCDDriver *driver, int x, int y, int width, int height, const uint16_t *pixels)
+{
+    if (!driver->background_buffer || x < 0 || y < 0 || width <= 0 || height <= 0) {
+        return;
+    }
+    if (x + width > driver->screen.w || y + height > driver->screen.h) {
+        return;
+    }
+
+    for (int row = 0; row < height; row++) {
+        memcpy(
+            driver->background_buffer + ((size_t) (y + row) * driver->screen.w) + x,
+            pixels + ((size_t) row * width),
+            (size_t) width * sizeof(uint16_t));
+    }
+}
+
 static void draw_rgb565_region(struct RGBLCDDriver *driver, int x, int y, int width, int height, const uint16_t *pixels)
 {
     if (driver->framebuffer_count > 1) {
@@ -785,6 +803,7 @@ static void draw_rgb565_region(struct RGBLCDDriver *driver, int x, int y, int wi
         mirror_region_to_inactive_framebuffers(driver, x, y, width, height, pixels);
     }
 
+    maybe_store_cover_background(driver, x, y, width, height, pixels);
     ESP_LOGI(TAG, "draw_rgb565_region: %dx%d pixels at (%d,%d)", width, height, x, y);
 }
 
@@ -840,14 +859,31 @@ static void process_message(Message *message, Context *ctx)
         int y = term_to_int(term_get_tuple_element(req, 2));
         int width = term_to_int(term_get_tuple_element(req, 3));
         int height = term_to_int(term_get_tuple_element(req, 4));
-        unsigned long addr_low = term_to_int(term_get_tuple_element(req, 5));
-        unsigned long addr_high = term_to_int(term_get_tuple_element(req, 6));
-        const uint16_t *data = (const uint16_t *) (addr_low | (addr_high << 16));
+        term payload = term_get_tuple_element(req, 5);
+        const uint16_t *data = NULL;
 
-        if (!data || width <= 0 || height <= 0 || x < 0 || y < 0
-                || x + width > driver->screen.w || y + height > driver->screen.h) {
-            ESP_LOGE(TAG, "Invalid draw_buffer arguments.");
-            return;
+        if (term_is_binary(payload)) {
+            size_t expected = (size_t) width * (size_t) height * 2;
+            if (width <= 0 || height <= 0 || x < 0 || y < 0
+                    || x + width > driver->screen.w || y + height > driver->screen.h
+                    || term_binary_size(payload) < expected) {
+                ESP_LOGE(TAG, "Invalid draw_buffer binary arguments.");
+                return;
+            }
+            data = (const uint16_t *) term_binary_data(payload);
+        } else {
+            if (term_get_tuple_arity(req) < 7) {
+                ESP_LOGE(TAG, "Invalid draw_buffer pointer arguments.");
+                return;
+            }
+            unsigned long addr_low = term_to_int(payload);
+            unsigned long addr_high = term_to_int(term_get_tuple_element(req, 6));
+            data = (const uint16_t *) (addr_low | (addr_high << 16));
+            if (!data || width <= 0 || height <= 0 || x < 0 || y < 0
+                    || x + width > driver->screen.w || y + height > driver->screen.h) {
+                ESP_LOGE(TAG, "Invalid draw_buffer pointer arguments.");
+                return;
+            }
         }
 
         draw_rgb565_region(driver, x, y, width, height, data);
