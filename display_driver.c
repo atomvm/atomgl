@@ -20,6 +20,8 @@
 
 #include <stdlib.h>
 
+#include <sdkconfig.h>
+
 #include <esp_idf_version.h>
 #include <esp_log.h>
 
@@ -34,7 +36,7 @@ Context *epaper_display_create_port(GlobalContext *global, term opts);
 Context *dcs_lcd_display_create_port(GlobalContext *global, term opts);
 Context *memory_lcd_display_create_port(GlobalContext *global, term opts);
 Context *oled_display_create_port(GlobalContext *global, term opts);
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0) && CONFIG_IDF_TARGET_ESP32S3
 Context *rgb_lcd_display_create_port(GlobalContext *global, term opts);
 #endif
 
@@ -58,7 +60,7 @@ Context *display_create_port(GlobalContext *global, term opts)
     if (!strcmp(compat_string, "waveshare,5in65-acep-7c")
         || !strcmp(compat_string, "good-display/gdep073e01")) {
         ctx = epaper_display_create_port(global, opts);
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0) && CONFIG_IDF_TARGET_ESP32S3
     } else if (!strcmp(compat_string, "waveshare,esp32-s3-touch-lcd-7")
         || !strcmp(compat_string, "esp_lcd,rgb")) {
         ctx = rgb_lcd_display_create_port(global, opts);

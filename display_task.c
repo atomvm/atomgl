@@ -144,6 +144,72 @@ static bool try_handle_register_font(Message *message, Context *ctx)
     return true;
 }
 
+static bool try_handle_measure_text(Message *message, Context *ctx)
+{
+    GenMessage gen_message;
+    if (UNLIKELY(port_parse_gen_message(message->message,
+                &gen_message) != GenCallMessage)) {
+        return false;
+    }
+
+    term req = gen_message.req;
+    if (UNLIKELY(!term_is_tuple(req) || term_get_tuple_arity(req) < 3)) {
+        return false;
+    }
+    term cmd = term_get_tuple_element(req, 0);
+
+    if (cmd != globalcontext_make_atom(ctx->global,
+                "\xC" "measure_text")) {
+        return false;
+    }
+
+    char *handle = interop_atom_to_string(ctx,
+            term_get_tuple_element(req, 1));
+    EpdFont *loaded_font = NULL;
+    if (handle != NULL) {
+        loaded_font = ufont_manager_find_by_handle(ufont_manager, handle);
+        free(handle);
+    }
+
+    term text_bin = term_get_tuple_element(req, 2);
+    size_t text_len = term_binary_size(text_bin);
+    char *text = malloc(text_len + 1);
+    if (text == NULL) {
+        BEGIN_WITH_STACK_HEAP(TUPLE_SIZE(2) + REF_SIZE, heap);
+        term return_tuple = term_alloc_tuple(2, &heap);
+        term_put_tuple_element(return_tuple, 0, gen_message.ref);
+        term_put_tuple_element(return_tuple, 1, ERROR_ATOM);
+        display_message_send(gen_message.pid, return_tuple, ctx->global);
+        END_WITH_STACK_HEAP(heap, ctx->global);
+        return true;
+    }
+    memcpy(text, term_binary_data(text_bin), text_len);
+    text[text_len] = '\0';
+
+    int width = 0;
+    int height = 0;
+    if (loaded_font != NULL) {
+        EpdFontProperties props = epd_font_properties_default();
+        EpdRect rect = epd_get_string_rect(loaded_font, text, 0, 0, 0, &props);
+        width = rect.width;
+        height = rect.height;
+    }
+    free(text);
+
+    BEGIN_WITH_STACK_HEAP(TUPLE_SIZE(3) + TUPLE_SIZE(2) + REF_SIZE, heap);
+    term result = term_alloc_tuple(3, &heap);
+    term_put_tuple_element(result, 0, OK_ATOM);
+    term_put_tuple_element(result, 1, term_from_int(width));
+    term_put_tuple_element(result, 2, term_from_int(height));
+    term return_tuple = term_alloc_tuple(2, &heap);
+    term_put_tuple_element(return_tuple, 0, gen_message.ref);
+    term_put_tuple_element(return_tuple, 1, result);
+    display_message_send(gen_message.pid, return_tuple, ctx->global);
+    END_WITH_STACK_HEAP(heap, ctx->global);
+
+    return true;
+}
+
 void display_task_process_messages(void *arg)
 {
     struct DisplayTaskArgs *args = arg;
@@ -154,7 +220,8 @@ void display_task_process_messages(void *arg)
         Message *message;
         xQueueReceive(args->messages_queue, &message, portMAX_DELAY);
 
-        if (!try_handle_register_font(message, args->ctx)) {
+        if (!try_handle_register_font(message, args->ctx)
+                && !try_handle_measure_text(message, args->ctx)) {
             args->process_message_fn(message, args->ctx);
         }
 

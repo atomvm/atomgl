@@ -49,6 +49,9 @@
 
 static const char *TAG = "rgb_lcd_display_driver";
 
+/* Matches display_server COLOR_BG (16#1A1A); solid fill before first scanout. */
+#define RGB565_BOOT_FILL_BYTE 0x1A
+
 struct RGBLCDDriver
 {
     esp_lcd_panel_handle_t panel;
@@ -1037,10 +1040,13 @@ static void display_init(Context *ctx, term opts)
     void *fb1 = NULL;
     err = esp_lcd_rgb_panel_get_frame_buffer(driver->panel, 2, &fb0, &fb1);
     if (err == ESP_OK && fb0 && fb1) {
+        size_t fb_bytes = (size_t) width * (size_t) height * sizeof(uint16_t);
+        memset(fb0, RGB565_BOOT_FILL_BYTE, fb_bytes);
+        memset(fb1, RGB565_BOOT_FILL_BYTE, fb_bytes);
         driver->framebuffers[0] = fb0;
         driver->framebuffers[1] = fb1;
         driver->framebuffer_count = 2;
-        ESP_LOGI(TAG, "Using RGB LCD double framebuffer: %p %p", fb0, fb1);
+        ESP_LOGI(TAG, "Using RGB LCD double framebuffer: %p %p (boot fill)", fb0, fb1);
     } else {
         ESP_LOGW(TAG, "RGB LCD multi-framebuffer unavailable, using draw_bitmap path: %s", esp_err_to_name(err));
     }

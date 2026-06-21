@@ -20,7 +20,7 @@
 
 # WHOLE_ARCHIVE option is supported only with esp-idf 5.x
 # A link option will be used with esp-idf 4.x
-if (IDF_VERSION_MAJOR GREATER_EQUAL 5)
+if (IDF_VERSION_MAJOR GREATER_EQUAL 5 AND IDF_TARGET STREQUAL "esp32s3")
     set(OPTIONAL_WHOLE_ARCHIVE WHOLE_ARCHIVE)
     set(OPTIONAL_ESP_LCD_REQUIRES "esp_lcd")
     set(OPTIONAL_RGB_LCD_SRCS "rgb_lcd_display_driver.c")

@@ -395,6 +395,16 @@ like progress bars or dynamic text fields where a full-screen redraw is unnecess
 :port.call(display, {:update_region, x, y, width, height, display_list}, 500)
 ```
 
+### measure_text
+
+Returns the pixel width and height of a text string for a registered uFont handle.
+Use this to size marquee regions or layout before building a display list.
+
+```elixir
+# {:ok, width, height} or {:error, reason}
+:port.call(display, {:measure_text, :default16px, "Hello"}, 500)
+```
+
 ### draw_buffer
 
 Draws a preformatted RGB565 buffer already resident in memory. Each pixel is 2 bytes
