@@ -147,7 +147,7 @@ ili_display_opts = [
   spi_host: spi
 ]
 
-:erlang.open_port({:spawn, "display"}, display_opts)
+:erlang.open_port({:spawn, "display"}, ili_display_opts)
 ```
 
 ### Direct Port Usage
