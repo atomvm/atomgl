@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 #include <interop.h>
 
@@ -35,9 +36,7 @@ struct Surface
     int width;
     int height;
     void *buffer;
-    uint32_t fg_color; // RGBA8888 little-endian byte order with the
-                       // alpha byte cleared; ORed with the per-pixel
-                       // alpha in epd_draw_pixel.
+    uint32_t fg_color; // 0xRRGGBBAA from Erlang color << 8 | 0xFF
 };
 
 #define BPP 4
@@ -51,8 +50,8 @@ void epd_draw_pixel(int xpos, int ypos, uint8_t color, void *buffer)
         return;
     }
 
-    uint32_t *pixel = (uint32_t *) (((uint8_t *) surface->buffer)
-            + (surface->width * ypos + xpos) * sizeof(uint32_t));
+    uint8_t *pixel = ((uint8_t *) surface->buffer)
+            + (surface->width * ypos + xpos) * sizeof(uint32_t);
 
     // The `color` parameter is the LUT-mapped glyph value from
     // draw_char: 0 = full foreground (fg_color=0 in default props),
@@ -60,9 +59,51 @@ void epd_draw_pixel(int xpos, int ypos, uint8_t color, void *buffer)
     // the foreground RGB on transparent with anti-aliased alpha
     // derived from the inverted grayscale.
     uint8_t alpha = (15 - (color >> 4)) * 17;
-    *pixel = ((uint32_t) alpha << 24) | (surface->fg_color & 0x00FFFFFFu);
+    pixel[0] = (surface->fg_color >> 24) & 0xFFu;
+    pixel[1] = (surface->fg_color >> 16) & 0xFFu;
+    pixel[2] = (surface->fg_color >> 8) & 0xFFu;
+    pixel[3] = alpha;
 }
 #endif /* ENABLE_UFONT */
+
+static bool parse_image_tuple(term img, Context *ctx, int *width, int *height, const char **pix, bool *rgb565_pixels)
+{
+    term format = term_get_tuple_element(img, 0);
+    *width = term_to_int(term_get_tuple_element(img, 1));
+    *height = term_to_int(term_get_tuple_element(img, 2));
+    term data_term = term_get_tuple_element(img, 3);
+
+    if (*width <= 0 || *height <= 0) {
+        fprintf(stderr, "invalid image dimensions: %ix%i\n", *width, *height);
+        return false;
+    }
+
+    size_t bytes_per_pixel;
+    if (format == context_make_atom(ctx, "\x8"
+                                         "rgba8888")) {
+        *rgb565_pixels = false;
+        bytes_per_pixel = 4;
+    } else if (format == context_make_atom(ctx, "\x6"
+                                                "rgb565")) {
+        *rgb565_pixels = true;
+        bytes_per_pixel = 2;
+    } else {
+        fprintf(stderr, "unsupported image format: ");
+        term_display(stderr, format, ctx);
+        fprintf(stderr, "\n");
+        return false;
+    }
+
+    size_t expected = (size_t) *width * (size_t) *height * bytes_per_pixel;
+    if (term_binary_size(data_term) < expected) {
+        fprintf(stderr, "image binary too small (%lu < %zu)\n",
+            (unsigned long) term_binary_size(data_term), expected);
+        return false;
+    }
+
+    *pix = term_binary_data(data_term);
+    return true;
+}
 
 void display_items_init_item(BaseDisplayItem *item, term req, Context *ctx)
 {
@@ -86,17 +127,15 @@ void display_items_init_item(BaseDisplayItem *item, term req, Context *ctx)
 
         term img = term_get_tuple_element(req, 4);
 
-        term format = term_get_tuple_element(img, 0);
-        if (format != context_make_atom(ctx, "\x8"
-                                             "rgba8888")) {
-            fprintf(stderr, "unsupported image format: ");
-            term_display(stderr, format, ctx);
-            fprintf(stderr, "\n");
+        int width;
+        int height;
+        const char *pix;
+        if (!parse_image_tuple(img, ctx, &width, &height, &pix, &item->rgb565_pixels)) {
             return;
         }
-        item->width = term_to_int(term_get_tuple_element(img, 1));
-        item->height = term_to_int(term_get_tuple_element(img, 2));
-        item->data.image_data.pix = term_binary_data(term_get_tuple_element(img, 3));
+        item->width = width;
+        item->height = height;
+        item->data.image_data.pix = pix;
 
     } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x14", "scaled_cropped_image"))) {
         item->primitive = PrimitiveScaledCroppedImage;
@@ -118,21 +157,34 @@ void display_items_init_item(BaseDisplayItem *item, term req, Context *ctx)
         item->x_scale = term_to_int(term_get_tuple_element(req, 8));
         item->y_scale = term_to_int(term_get_tuple_element(req, 9));
 
+        if (item->x_scale <= 0 || item->y_scale <= 0) {
+            fprintf(stderr, "scaled_cropped_image: scale factors must be > 0\n");
+            return;
+        }
+        if (item->source_x < 0 || item->source_y < 0) {
+            fprintf(stderr, "scaled_cropped_image: source offsets must be >= 0\n");
+            return;
+        }
+
         // 10th element is for opts, but right now no opts are supported
 
         term img = term_get_tuple_element(req, 11);
 
-        term format = term_get_tuple_element(img, 0);
-        if (format != globalcontext_make_atom(ctx->global, "\x8"
-                                             "rgba8888")) {
-            fprintf(stderr, "unsupported image format: ");
-            term_display(stderr, format, ctx);
-            fprintf(stderr, "\n");
+        int img_width;
+        int img_height;
+        const char *pix;
+        if (!parse_image_tuple(img, ctx, &img_width, &img_height, &pix, &item->rgb565_pixels)) {
             return;
         }
-        item->data.image_data_with_size.width = term_to_int(term_get_tuple_element(img, 1));
-        item->data.image_data_with_size.height = term_to_int(term_get_tuple_element(img, 2));
-        item->data.image_data_with_size.pix = term_binary_data(term_get_tuple_element(img, 3));
+        item->data.image_data_with_size.width = img_width;
+        item->data.image_data_with_size.height = img_height;
+        item->data.image_data_with_size.pix = pix;
+
+        if (item->source_x >= item->data.image_data_with_size.width
+                || item->source_y >= item->data.image_data_with_size.height) {
+            fprintf(stderr, "scaled_cropped_image: source offset outside image\n");
+            return;
+        }
 
     } else if (cmd == context_make_atom(ctx, "\x4"
                                              "rect")) {
@@ -197,20 +249,29 @@ void display_items_init_item(BaseDisplayItem *item, term req, Context *ctx)
             struct Surface surface;
             surface.width = rect.width;
             surface.height = rect.height;
-            surface.buffer = malloc(rect.width * rect.height * BPP);
+            if (rect.width <= 0 || rect.height <= 0) {
+                fprintf(stderr, "invalid ufont surface size (%ix%i)\n",
+                    rect.width, rect.height);
+                free(text);
+                return;
+            }
+            size_t pixel_count = (size_t) rect.width * (size_t) rect.height;
+            if (pixel_count > SIZE_MAX / BPP) {
+                fprintf(stderr, "ufont surface size overflow (%ix%i)\n",
+                    rect.width, rect.height);
+                free(text);
+                return;
+            }
+            size_t surface_bytes = pixel_count * BPP;
+            surface.buffer = malloc(surface_bytes);
             if (!surface.buffer) {
                 fprintf(stderr, "Failed to allocate ufont surface (%ix%i)\n",
                     rect.width, rect.height);
                 free(text);
                 return;
             }
-            memset(surface.buffer, 0, rect.width * rect.height * BPP);
-            // Convert Erlang fgcolor (0xRRGGBBAA) to RGBA8888 little-
-            // endian byte order (R in low byte, alpha byte cleared) so
-            // epd_draw_pixel can OR it with the per-pixel alpha.
-            surface.fg_color = ((fgcolor >> 24) & 0xFFu)
-                    | (((fgcolor >> 16) & 0xFFu) << 8)
-                    | (((fgcolor >> 8) & 0xFFu) << 16);
+            memset(surface.buffer, 0, surface_bytes);
+            surface.fg_color = fgcolor;
             int text_x = 0;
             int text_y = loaded_font->ascender;
             enum EpdDrawError res = epd_write_default(loaded_font, text, &text_x, &text_y, &surface);

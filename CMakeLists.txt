@@ -18,12 +18,20 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-# WHOLE_ARCHIVE option is supported only with esp-idf 5.x
-# A link option will be used with esp-idf 4.x
-if (IDF_VERSION_MAJOR GREATER_EQUAL 5)
+# RGB LCD support depends on ESP-IDF 5.x esp_lcd RGB panel APIs and is
+# currently enabled only for ESP32-S3 targets.
+#
+# The ESP32 build statically links AtomVM ports/drivers into the final image.
+# WHOLE_ARCHIVE is enabled together with the RGB LCD driver so the native
+# driver/port registration code is not discarded by the linker.
+if (IDF_VERSION_MAJOR GREATER_EQUAL 5 AND IDF_TARGET STREQUAL "esp32s3")
     set(OPTIONAL_WHOLE_ARCHIVE WHOLE_ARCHIVE)
+    set(OPTIONAL_ESP_LCD_REQUIRES "esp_lcd")
+    set(OPTIONAL_RGB_LCD_SRCS "rgb_lcd_display_driver.c")
 else()
     set(OPTIONAL_WHOLE_ARCHIVE "")
+    set(OPTIONAL_ESP_LCD_REQUIRES "")
+    set(OPTIONAL_RGB_LCD_SRCS "")
 endif()
 
 idf_component_register(SRCS
@@ -44,6 +52,7 @@ idf_component_register(SRCS
     "memory_display_driver.c"
     "oled_commands.c"
     "oled_display_driver.c"
+    ${OPTIONAL_RGB_LCD_SRCS}
     "spi_dc_driver.c"
     "spi_display.c"
     "ufontlib.c"
@@ -51,7 +60,7 @@ idf_component_register(SRCS
     "image_helpers.c"
     "spng.c"
     "miniz.c"
-    PRIV_REQUIRES "libatomvm" "avm_sys" "avm_builtins" "driver" "sdmmc" "vfs" "fatfs"
+    PRIV_REQUIRES "libatomvm" "avm_sys" "avm_builtins" "driver" ${OPTIONAL_ESP_LCD_REQUIRES} "sdmmc" "vfs" "fatfs"
     ${OPTIONAL_WHOLE_ARCHIVE}
 )
 

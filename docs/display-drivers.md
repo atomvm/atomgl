@@ -322,6 +322,124 @@ Each entry can be:
 
 These sequences are highly specific to each display model and typically come from the manufacturer's datasheet or reference implementation.
 
+### RGB LCD Panels (esp_lcd,rgb)
+
+RGB LCD panels driven through the ESP32-S3 RGB LCD peripheral. Requires ESP-IDF 5 or later and is compiled only for `esp32s3` targets.
+
+Developed and tested on the **Waveshare ESP32-S3 7-inch RGB Touch LCD** (800×480, 16-bit RGB565 parallel interface).
+
+**Compatible strings:** `"esp_lcd,rgb"` or `"waveshare,esp32-s3-touch-lcd-7"`
+
+**Note:** The Waveshare compatible string names the board/display model. This driver covers the RGB LCD panel path; touch input is handled separately.
+
+Other ESP32 targets do not pull in the `esp_lcd` dependency or the RGB LCD driver source.
+
+| Option | Type | Description | Default |
+|--------|------|-------------|---------|
+| `width` | integer | Display width in pixels | 800 |
+| `height` | integer | Display height in pixels | 480 |
+| `pclk_hz` | integer | Pixel clock frequency | 16_000_000 |
+| `hsync_pulse_width` | integer | HSYNC pulse width | 4 |
+| `hsync_back_porch` | integer | HSYNC back porch | 8 |
+| `hsync_front_porch` | integer | HSYNC front porch | 8 |
+| `vsync_pulse_width` | integer | VSYNC pulse width | 4 |
+| `vsync_back_porch` | integer | VSYNC back porch | 8 |
+| `vsync_front_porch` | integer | VSYNC front porch | 8 |
+| `hsync_gpio` | integer | HSYNC GPIO pin | 46 |
+| `vsync_gpio` | integer | VSYNC GPIO pin | 3 |
+| `de_gpio` | integer | Data enable GPIO pin | 5 |
+| `pclk_gpio` | integer | Pixel clock GPIO pin | 7 |
+| `data_gpios` | list of 16 integers | Data GPIO pins (R0–R4, G0–G5, B0–B4) | Required |
+| `bounce_buffer_size_px` | integer | DMA bounce buffer size | 8000 |
+| `pclk_active_neg` | boolean | PCLK active on negative edge | true |
+| `fb_in_psram` | boolean | Place framebuffers in PSRAM | true |
+
+The RGB LCD driver supports double framebuffering in PSRAM when available for
+tear-free rendering. It provides the standard `update` and `update_region` port
+commands, plus `draw_buffer` for direct RGB565 buffer delivery from image tuples.
+
+**Example:**
+```elixir
+rgb_lcd_opts = [
+  compatible: "esp_lcd,rgb",
+  width: 800,
+  height: 480,
+  pclk_hz: 16_000_000,
+  hsync_pulse_width: 4,
+  hsync_back_porch: 8,
+  hsync_front_porch: 8,
+  vsync_pulse_width: 4,
+  vsync_back_porch: 8,
+  vsync_front_porch: 8,
+  hsync_gpio: 46,
+  vsync_gpio: 3,
+  de_gpio: 5,
+  pclk_gpio: 7,
+  data_gpios: [10, 9, 46, 3, 18, 8, 17, 16, 15, 47, 48, 45, 42, 6, 1, 2],
+  bounce_buffer_size_px: 8000,
+  pclk_active_neg: true,
+  fb_in_psram: true
+]
+```
+
+## Region Updates and Raw Drawing
+
+In addition to full-screen `update`, the following port commands are available on
+supported drivers:
+
+### update_region
+
+Partially updates a rectangular region of the display without redrawing the entire
+screen. This is a compatibility workaround for partial refreshes until a richer
+display-list damage tracker is available. It is useful for incremental UI updates
+like progress bars or dynamic text fields where a full-screen redraw is unnecessary.
+
+```elixir
+# Update only a 200×100 region at (50, 40)
+:port.call(display, {:update_region, x, y, width, height, display_list}, 500)
+```
+
+When using transparent or anti-aliased text in a region update, include a solid
+background item behind the updated area in the display list. Transparent pixels
+are resolved against lower display-list items; without a solid background,
+results may depend on previous framebuffer contents.
+
+### register_font
+
+Registers a uFont binary under an atom handle. Use the same handle later in text
+items or `measure_text` calls.
+
+```elixir
+font_binary = File.read!("NotoSans.ufont")
+:port.call(display, {:register_font, :noto_sans_24, font_binary}, 5000)
+```
+
+### measure_text
+
+Returns the pixel width and height of a binary text string for a registered
+uFont handle. Use this to size marquee regions or layout before building a
+display list. Unknown font handles currently return `{:ok, 0, 0}`.
+
+```elixir
+# Returns {:ok, width, height}; allocation failure returns :error.
+:port.call(display, {:measure_text, :noto_sans_24, "Hello"}, 500)
+```
+
+### draw_buffer
+
+Draws a preformatted RGB565 binary. Each pixel is 2 bytes in little-endian
+RGB565 format. The binary size must be exactly `width × height × 2` bytes.
+Use this with image tuples such as `{:rgb565, width, height, binary}`.
+
+```elixir
+# Draw a 100×100 preformatted RGB565 image at (10, 10)
+:port.call(display, {:draw_buffer, 10, 10, 100, 100, rgb565_binary}, 5000)
+```
+
+Advanced native callers may also pass a pointer form as
+`{:draw_buffer, x, y, width, height, addr_low, addr_high}` when the RGB565 buffer
+is already resident in device memory.
+
 ## Updating the Display
 
 Once configured, update the display using the display port:

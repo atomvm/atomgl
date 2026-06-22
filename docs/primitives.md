@@ -25,6 +25,11 @@ The `transparent` atom indicates that no background is drawn for the item's boun
 allowing the item to be properly rendered over lower items in the display list. This may have
 performance implications.
 
+Anti-aliased uFont text with a transparent background is composited against the display list:
+partial-alpha glyph edge pixels blend with the resolved colour from the next lower opaque item
+rather than against framebuffer memory. This produces smooth anti-aliased text on any
+background, provided a solid rectangle exists below it in the display list.
+
 ### Text
 Text can be provided as either an Erlang string (a list) or an Elixir string (a binary). UTF-8
 encoding is supported.
@@ -95,6 +100,12 @@ The format tag indicates the pixel format. For example, `rgba8888` means:
 - RGBA format with alpha channel
 - Byte order: R, G, B, A
 - Each component is 8 bits
+
+`rgb565` means:
+- 16-bit RGB565 pixels
+- Byte order: little-endian
+- 2 bytes per pixel (`width × height × 2` bytes total)
+- Use with `draw_buffer` for direct framebuffer delivery on RGB LCD drivers
 
 **Important:** Width and height must exactly match the dimensions of the image data in the binary.
 Incorrect values will result in corrupted image display.
