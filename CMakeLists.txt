@@ -18,8 +18,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-# WHOLE_ARCHIVE option is supported only with esp-idf 5.x
-# A link option will be used with esp-idf 4.x
+# RGB LCD support depends on ESP-IDF 5.x esp_lcd RGB panel APIs and is
+# currently enabled only for ESP32-S3 targets.
+#
+# The ESP32 build statically links AtomVM ports/drivers into the final image.
+# WHOLE_ARCHIVE is enabled together with the RGB LCD driver so the native
+# driver/port registration code is not discarded by the linker.
 if (IDF_VERSION_MAJOR GREATER_EQUAL 5 AND IDF_TARGET STREQUAL "esp32s3")
     set(OPTIONAL_WHOLE_ARCHIVE WHOLE_ARCHIVE)
     set(OPTIONAL_ESP_LCD_REQUIRES "esp_lcd")
