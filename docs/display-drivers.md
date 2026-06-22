@@ -324,11 +324,15 @@ These sequences are highly specific to each display model and typically come fro
 
 ### RGB LCD Panels (esp_lcd,rgb)
 
-RGB LCD panels driven through the ESP32-S3 RGB LCD peripheral. Requires ESP-IDF 5 or later.
+RGB LCD panels driven through the ESP32-S3 RGB LCD peripheral. Requires ESP-IDF 5 or later and is compiled only for `esp32s3` targets.
 
 Developed and tested on the **Waveshare ESP32-S3 7-inch RGB Touch LCD** (800×480, 16-bit RGB565 parallel interface).
 
 **Compatible strings:** `"esp_lcd,rgb"` or `"waveshare,esp32-s3-touch-lcd-7"`
+
+**Note:** The Waveshare compatible string names the board/display model. This driver covers the RGB LCD panel path; touch input is handled separately.
+
+Other ESP32 targets do not pull in the `esp_lcd` dependency or the RGB LCD driver source.
 
 | Option | Type | Description | Default |
 |--------|------|-------------|---------|
@@ -395,27 +399,46 @@ like progress bars or dynamic text fields where a full-screen redraw is unnecess
 :port.call(display, {:update_region, x, y, width, height, display_list}, 500)
 ```
 
-### measure_text
+When using transparent or anti-aliased text in a region update, include a solid
+background item behind the updated area in the display list. Transparent pixels
+are resolved against lower display-list items; without a solid background,
+results may depend on previous framebuffer contents.
 
-Returns the pixel width and height of a text string for a registered uFont handle.
-Use this to size marquee regions or layout before building a display list.
+### register_font
+
+Registers a uFont binary under an atom handle. Use the same handle later in text
+items or `measure_text` calls.
 
 ```elixir
-# {:ok, width, height} or {:error, reason}
-:port.call(display, {:measure_text, :default16px, "Hello"}, 500)
+font_binary = File.read!("NotoSans.ufont")
+:port.call(display, {:register_font, :noto_sans_24, font_binary}, 5000)
+```
+
+### measure_text
+
+Returns the pixel width and height of a binary text string for a registered
+uFont handle. Use this to size marquee regions or layout before building a
+display list. Unknown font handles currently return `{:ok, 0, 0}`.
+
+```elixir
+# Returns {:ok, width, height}; allocation failure returns :error.
+:port.call(display, {:measure_text, :noto_sans_24, "Hello"}, 500)
 ```
 
 ### draw_buffer
 
-Draws a preformatted RGB565 buffer already resident in memory. Each pixel is 2 bytes
-in little-endian RGB565 format. The buffer address is passed as two 32-bit integers
-(low and high halves). Use with image tuples such as `{:rgb565, width, height, binary}`
-after loading the buffer into device memory.
+Draws a preformatted RGB565 binary. Each pixel is 2 bytes in little-endian
+RGB565 format. The binary size must be exactly `width × height × 2` bytes.
+Use this with image tuples such as `{:rgb565, width, height, binary}`.
 
 ```elixir
-# Draw a 100×100 pre-formatted RGB565 image at (10, 10)
-:port.call(display, {:draw_buffer, 10, 10, 100, 100, addr_low, addr_high}, 5000)
+# Draw a 100×100 preformatted RGB565 image at (10, 10)
+:port.call(display, {:draw_buffer, 10, 10, 100, 100, rgb565_binary}, 5000)
 ```
+
+Advanced native callers may also pass a pointer form as
+`{:draw_buffer, x, y, width, height, addr_low, addr_high}` when the RGB565 buffer
+is already resident in device memory.
 
 ## Updating the Display
 
