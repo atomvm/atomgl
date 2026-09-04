@@ -127,7 +127,43 @@ static bool try_handle_register_font(Message *message, Context *ctx)
     char *handle = interop_atom_to_string(ctx,
             term_get_tuple_element(req, 1));
     if (loaded_font != NULL && handle != NULL) {
-        ufont_manager_register(ufont_manager, handle, loaded_font);
+        ufont_manager_register(ufont_manager, handle, loaded_font, owned_buf);
+    }
+    free(handle);
+
+    BEGIN_WITH_STACK_HEAP(TUPLE_SIZE(2) + REF_SIZE, heap);
+    term return_tuple = term_alloc_tuple(2, &heap);
+    term_put_tuple_element(return_tuple, 0, gen_message.ref);
+    term_put_tuple_element(return_tuple, 1, OK_ATOM);
+    display_message_send(gen_message.pid, return_tuple, ctx->global);
+    END_WITH_STACK_HEAP(heap, ctx->global);
+
+    return true;
+}
+
+static bool try_handle_deregister_font(Message *message, Context *ctx)
+{
+    GenMessage gen_message;
+    if (UNLIKELY(port_parse_gen_message(message->message,
+                &gen_message) != GenCallMessage)) {
+        return false;
+    }
+
+    term req = gen_message.req;
+    if (UNLIKELY(!term_is_tuple(req) || term_get_tuple_arity(req) < 2)) {
+        return false;
+    }
+    term cmd = term_get_tuple_element(req, 0);
+
+    if (cmd != globalcontext_make_atom(ctx->global,
+                "\xF" "deregister_font")) {
+        return false;
+    }
+
+    char *handle = interop_atom_to_string(ctx,
+            term_get_tuple_element(req, 1));
+    if (handle != NULL) {
+        ufont_manager_unregister(ufont_manager, handle);
     }
     free(handle);
 
@@ -151,7 +187,8 @@ void display_task_process_messages(void *arg)
         Message *message;
         xQueueReceive(args->messages_queue, &message, portMAX_DELAY);
 
-        if (!try_handle_register_font(message, args->ctx)) {
+        if (!try_handle_register_font(message, args->ctx)
+                && !try_handle_deregister_font(message, args->ctx)) {
             args->process_message_fn(message, args->ctx);
         }
 

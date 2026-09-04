@@ -192,8 +192,10 @@ struct UFontManager;
 typedef struct UFontManager UFontManager;
 
 UFontManager *ufont_manager_new();
-void ufont_manager_register(UFontManager *ufont_manager, const char *handle, EpdFont *font);
+void ufont_manager_register(UFontManager *ufont_manager, const char *handle, EpdFont *font,
+        void *owned_data);
 EpdFont *ufont_manager_find_by_handle(UFontManager *ufont_manager, const char *handle);
+bool ufont_manager_unregister(UFontManager *ufont_manager, const char *handle);
 
 EpdFont *ufont_parse(const void *iff_binary, int buf_size);
 

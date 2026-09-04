@@ -529,6 +529,7 @@ typedef struct
     struct UFListHead list_head;
     const char *handle;
     EpdFont *font;
+    void *owned_data;
 } UFont;
 
 struct UFontManager
@@ -544,12 +545,33 @@ UFontManager *ufont_manager_new()
     return ufont_manager;
 }
 
-void ufont_manager_register(UFontManager *ufont_manager, const char *handle, EpdFont *font)
+void ufont_manager_register(UFontManager *ufont_manager, const char *handle, EpdFont *font,
+        void *owned_data)
 {
     UFont *ufont = malloc(sizeof(UFont));
     ufont->handle = strdup(handle);
     ufont->font = font;
+    ufont->owned_data = owned_data;
     uflist_append(&ufont_manager->font_list, &ufont->list_head);
+}
+
+bool ufont_manager_unregister(UFontManager *ufont_manager, const char *handle)
+{
+    struct UFListHead *item;
+    LIST_FOR_EACH (item, &ufont_manager->font_list) {
+        UFont *ufont = GET_LIST_ENTRY(item, UFont, list_head);
+        if (!strcmp(handle, ufont->handle)) {
+            uflist_remove(item);
+            // EpdFont points into owned_data, so it is freed first.
+            free((void *) ufont->handle);
+            free(ufont->font);
+            free(ufont->owned_data);
+            free(ufont);
+            return true;
+        }
+    }
+
+    return false;
 }
 
 EpdFont *ufont_manager_find_by_handle(UFontManager *ufont_manager, const char *handle)
