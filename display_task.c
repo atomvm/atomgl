@@ -187,13 +187,16 @@ void display_task_process_messages(void *arg)
         Message *message;
         xQueueReceive(args->messages_queue, &message, portMAX_DELAY);
 
+        bool retained = false;
         if (!try_handle_register_font(message, args->ctx)
                 && !try_handle_deregister_font(message, args->ctx)) {
-            args->process_message_fn(message, args->ctx);
+            retained = args->process_message_fn(message, args->ctx);
         }
 
-        BEGIN_WITH_STACK_HEAP(1, temp_heap);
-        mailbox_message_dispose(&message->base, &temp_heap);
-        END_WITH_STACK_HEAP(temp_heap, args->ctx->global);
+        if (!retained) {
+            BEGIN_WITH_STACK_HEAP(1, temp_heap);
+            mailbox_message_dispose(&message->base, &temp_heap);
+            END_WITH_STACK_HEAP(temp_heap, args->ctx->global);
+        }
     }
 }

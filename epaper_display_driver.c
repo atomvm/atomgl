@@ -179,6 +179,10 @@ static void send_post_frame_refresh(struct EpaperDriver *driver)
 
 static void do_update(Context *ctx, term display_list)
 {
+    // TODO: skip the (slow, flashing) refresh when the display list is
+    // identical to the previous one, using display_frame/display_diff like
+    // the other drivers; the periodic clear_screen() in maybe_refresh() must
+    // then call display_frame_invalidate_all().
     maybe_refresh(ctx);
     wait_some_time(ctx);
 
@@ -242,7 +246,7 @@ static void do_update(Context *ctx, term display_list)
     update_last_refresh_ts(ctx);
 }
 
-static void process_message(Message *message, Context *ctx)
+static bool process_message(Message *message, Context *ctx)
 {
     GenMessage gen_message;
     if (UNLIKELY(port_parse_gen_message(message->message, &gen_message) != GenCallMessage)) {
@@ -261,11 +265,11 @@ static void process_message(Message *message, Context *ctx)
 
         term display_list = term_get_tuple_element(req, 1);
         do_update(ctx, display_list);
-        return;
+        return false;
 
     } else if (cmd == globalcontext_make_atom(ctx->global, "\xA" "load_image")) {
         handle_load_image(req, gen_message.ref, gen_message.pid, ctx);
-        return;
+        return false;
 
     } else {
 #if REPORT_UNEXPECTED_MSGS
@@ -282,6 +286,8 @@ static void process_message(Message *message, Context *ctx)
 
     display_message_send(gen_message.pid, return_tuple, ctx->global);
     END_WITH_STACK_HEAP(heap, ctx->global);
+
+    return false;
 }
 
 static void clear_screen(Context *ctx, int color)

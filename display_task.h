@@ -21,6 +21,8 @@
 #ifndef _DISPLAY_TASK_H_
 #define _DISPLAY_TASK_H_
 
+#include <stdbool.h>
+
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 
@@ -30,7 +32,9 @@
 struct DisplayTaskArgs
 {
     QueueHandle_t messages_queue;
-    void (*process_message_fn)(Message *message, Context *ctx);
+    // Handles one message. Returns true when the driver keeps the message
+    // (and disposes it itself later), false when the task must dispose it.
+    bool (*process_message_fn)(Message *message, Context *ctx);
     Context *ctx;
 };
 

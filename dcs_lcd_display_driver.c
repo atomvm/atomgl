@@ -245,7 +245,7 @@ static void do_update(Context *ctx, term display_list)
 #endif
 }
 
-static void process_message(Message *message, Context *ctx)
+static bool process_message(Message *message, Context *ctx)
 {
     GenMessage gen_message;
     if (UNLIKELY(port_parse_gen_message(message->message, &gen_message) != GenCallMessage)) {
@@ -265,7 +265,7 @@ static void process_message(Message *message, Context *ctx)
                                       "update")) {
         term display_list = term_get_tuple_element(req, 1);
         do_update(ctx, display_list);
-        return;
+        return false;
 
     } else if (cmd == context_make_atom(ctx, "\xB"
                                              "draw_buffer")) {
@@ -282,11 +282,11 @@ static void process_message(Message *message, Context *ctx)
 
         // Reply already sent at enqueue time by
         // try_pre_ack_render_cmd in display_task.c.
-        return;
+        return false;
 
     } else if (cmd == globalcontext_make_atom(ctx->global, "\xA" "load_image")) {
         handle_load_image(req, gen_message.ref, gen_message.pid, ctx);
-        return;
+        return false;
 
     } else {
         fprintf(stderr, "display: ");
@@ -301,6 +301,8 @@ static void process_message(Message *message, Context *ctx)
 
     display_message_send(gen_message.pid, return_tuple, ctx->global);
     END_WITH_STACK_HEAP(heap, ctx->global);
+
+    return false;
 }
 
 static void set_rotation(struct DCSLCDDriver *driver, int rotation)
