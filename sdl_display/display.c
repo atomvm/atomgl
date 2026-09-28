@@ -552,7 +552,7 @@ static void process_message(Context *ctx)
         if (term_get_tuple_arity(req) != 2) {
             goto invalid_message;
         }
-        term sources = term_get_tuple_element(req, 2);
+        term sources = term_get_tuple_element(req, 1);
         if (term_is_pid(keyboard_pid) || sources != globalcontext_make_atom(ctx->global, "\x3" "all")) {
             fprintf(stderr, "Warning: only one subscriber to all sources is supported now\n");
         }
