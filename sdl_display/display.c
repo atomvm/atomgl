@@ -21,6 +21,7 @@
 #include <SDL.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 
 #include <context.h>
@@ -566,13 +567,22 @@ static void process_message(Context *ctx)
 
     } else if (cmd == globalcontext_make_atom(ctx->global, "\xD" "register_font")) {
         term font_bin = term_get_tuple_element(req, 2);
-        EpdFont *loaded_font = ufont_parse(term_binary_data(font_bin), term_binary_size(font_bin));
+        size_t font_size = term_binary_size(font_bin);
+        void *owned_buf = malloc(font_size);
+        EpdFont *loaded_font = NULL;
+        if (owned_buf != NULL) {
+            memcpy(owned_buf, term_binary_data(font_bin), font_size);
+            loaded_font = ufont_parse(owned_buf, font_size);
+            if (loaded_font == NULL) {
+                free(owned_buf);
+            }
+        }
 
         char *handle = interop_atom_to_string(ctx, term_get_tuple_element(req, 1));
-        if (handle != NULL) {
-            ufont_manager_register(ufont_manager, handle, loaded_font);
-            free(handle);
+        if (loaded_font != NULL && handle != NULL) {
+            ufont_manager_register(ufont_manager, handle, loaded_font, owned_buf);
         }
+        free(handle);
 
     } else {
         fprintf(stderr, "unexpected command: ");
