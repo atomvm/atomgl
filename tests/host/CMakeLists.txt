@@ -29,6 +29,13 @@ option(ATOMGL_TESTS_SANITIZE "Build the tests with AddressSanitizer and UBSan" O
 
 set(ATOMGL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 
+# display_items.h includes libAtomVM headers; default to the AtomVM checkout
+# this component normally lives in (src/platforms/esp32/components/atomgl).
+set(LIBATOMVM_INCLUDE_PATH "${ATOMGL_DIR}/../../../../libAtomVM" CACHE PATH "Path to libAtomVM headers")
+if (NOT EXISTS "${LIBATOMVM_INCLUDE_PATH}/term.h")
+    message(FATAL_ERROR "libAtomVM headers not found, set LIBATOMVM_INCLUDE_PATH")
+endif()
+
 add_library(atomgl_test_options INTERFACE)
 target_compile_options(atomgl_test_options INTERFACE -Wall -Wextra)
 target_include_directories(atomgl_test_options INTERFACE ${ATOMGL_DIR})
@@ -43,3 +50,11 @@ add_executable(test_display_damage test_display_damage.c ${ATOMGL_DIR}/display_d
 target_link_libraries(test_display_damage atomgl_test_options)
 set_property(TARGET test_display_damage PROPERTY C_STANDARD 11)
 add_test(NAME display_damage COMMAND test_display_damage)
+
+add_executable(test_display_diff test_display_diff.c ${ATOMGL_DIR}/display_diff.c
+    ${ATOMGL_DIR}/display_damage.c ${ATOMGL_DIR}/shape.c ${ATOMGL_DIR}/font_data.c)
+target_include_directories(test_display_diff PRIVATE ${LIBATOMVM_INCLUDE_PATH})
+target_compile_definitions(test_display_diff PRIVATE AVM_TASK_DRIVER_ENABLED HAVE_ATOMIC)
+target_link_libraries(test_display_diff atomgl_test_options)
+set_property(TARGET test_display_diff PROPERTY C_STANDARD 11)
+add_test(NAME display_diff COMMAND test_display_diff)

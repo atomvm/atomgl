@@ -32,6 +32,7 @@ idf_component_register(SRCS
     "dcs_lcd_draw.c"
     "display_common.c"
     "display_damage.c"
+    "display_diff.c"
     "display_driver.c"
     "display_items.c"
     "display_message.c"
