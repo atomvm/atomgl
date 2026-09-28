@@ -64,8 +64,9 @@ ColoredRectScene = [
 ok = port:call(Display, {update, ColoredRectScene})
 ```
 
-Note: Without a background rectangle, some drivers may retain the previous image, but this is not a
-guaranteed feature.
+Note: Without a background rectangle, pixels no item covers are black on the DCS LCD and SDL
+drivers, white on the Sharp memory LCD and off on OLEDs; e-paper panels keep whatever the previous
+refresh left there.
 
 ### Memory Efficiency
 
@@ -115,6 +116,20 @@ idf.py build
 ### Building for Linux (SDL)
 
 For testing on Linux using SDL, see the [SDL display driver documentation](sdl_display/README.md).
+
+### Host Tests
+
+The platform independent modules (damage rectangles, display list comparison) have unit tests that
+run on the host, with AddressSanitizer and UBSan enabled by default:
+
+```bash
+cmake -S tests/host -B build-tests
+cmake --build build-tests
+ctest --test-dir build-tests
+```
+
+`display_items.h` includes libAtomVM headers; when AtomGL is not checked out inside the AtomVM tree,
+pass `-DLIBATOMVM_INCLUDE_PATH=/path/to/AtomVM/src/libAtomVM`.
 
 ## Getting Started
 
@@ -212,7 +227,9 @@ See the [primitives documentation](docs/primitives.md) for detailed information 
 ## Important Notes
 
 - The display list approach means you always define the complete display state
-- Each update replaces the entire previous state (no incremental drawing)
+- Each update replaces the entire previous state (no incremental drawing); drivers repaint only
+  what changed, but that is transparent to the application (see the
+  [display drivers documentation](docs/display-drivers.md))
 - Z-order is determined by position in the list (first = topmost)
 - Always include a background rectangle to ensure proper screen clearing
 - The `update` command is the only imperative operation

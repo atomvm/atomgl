@@ -27,3 +27,18 @@ required).
 ## Run
 
 Once compiled, it must placed in the current working directory.
+
+## Testing Partial Updates
+
+The driver repaints only the areas that changed between two updates. Set
+`AVM_SDL_DISPLAY_VERIFY_DAMAGE=1` to have every frame rendered again from scratch and compared with
+the incrementally updated frame buffer; any mismatch is reported on stderr. `test_damage.erl` pushes
+a sequence of display lists exercising the update logic and can run headless:
+
+```bash
+erlc test_damage.erl
+AVM_SDL_DISPLAY_VERIFY_DAMAGE=1 SDL_VIDEODRIVER=dummy AtomVM test_damage.beam /path/to/atomvmlib.avm
+```
+
+Every `damage verify: frame N ok` line is a verified frame. A `FAILED` line is a bug: the `update`
+call then returns `{error, verify_failed}` and `test_damage` exits with a non-zero status.
