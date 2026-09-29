@@ -399,16 +399,13 @@ static int draw_text_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *it
     return drawn_pixels;
 }
 
-static int draw_x(int xpos, int ypos, BaseDisplayItem items[], size_t items_len)
+static int draw_x(int xpos, int ypos, BaseDisplayItem *items[], size_t items_len)
 {
     int line_len = screen->w - xpos;
     bool below = false;
 
     for (size_t i = 0; i < items_len; i++) {
-        BaseDisplayItem *item = &items[i];
-        if ((ypos < item->y) || (ypos >= item->y + item->height)) {
-            continue;
-        }
+        BaseDisplayItem *item = items[i];
         if (xpos < item->x) {
             int len_to_item = item->x - xpos;
             if (len_to_item < line_len) {
@@ -423,7 +420,7 @@ static int draw_x(int xpos, int ypos, BaseDisplayItem items[], size_t items_len)
         int max_line_len = below ? 1 : line_len;
 
         int drawn_pixels = 0;
-        switch (items[i].primitive) {
+        switch (item->primitive) {
             case PrimitiveImage:
                 drawn_pixels = draw_image_x(xpos, ypos, max_line_len, item);
                 break;
@@ -495,14 +492,22 @@ static bool do_update(Context *ctx, term display_list)
     damaged.width = screen->w;
     // END OF WORKAROUND
 
+    BaseDisplayItem **row = malloc(sizeof(BaseDisplayItem *) * len);
+    if (UNLIKELY(len > 0 && !row)) {
+        fprintf(stderr, "do_update: failed to alloc row\n");
+        return false;
+    }
+
     for (int ypos = damaged.y; ypos < damaged.y + damaged.height; ypos++) {
+        size_t row_len = display_items_row(items, len, ypos, row);
         int xpos = damaged.x;
         while (xpos < damaged.x + damaged.width) {
-            int drawn_pixels = draw_x(xpos, ypos, items, len);
+            int drawn_pixels = draw_x(xpos, ypos, row, row_len);
             xpos += drawn_pixels;
         }
     }
 
+    free(row);
     return true;
 }
 

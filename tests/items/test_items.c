@@ -229,6 +229,10 @@ static void render(term display_list, uint16_t *frame)
         fprintf(stderr, "render: display_items_new_list failed\n");
         abort();
     }
+    BaseDisplayItem **row = malloc(sizeof(BaseDisplayItem *) * (len ? len : 1));
+    if (row == NULL) {
+        abort();
+    }
 
     uint16_t line[SCREEN_W];
     struct DCSLCDScreen screen;
@@ -239,9 +243,10 @@ static void render(term display_list, uint16_t *frame)
 
     for (int ypos = 0; ypos < SCREEN_H; ypos++) {
         memset(line, 0, sizeof(line));
+        size_t row_len = display_items_row(items, len, ypos, row);
         int xpos = 0;
         while (xpos < SCREEN_W) {
-            int drawn_pixels = dcs_lcd_draw_x(&screen, xpos, ypos, items, len);
+            int drawn_pixels = dcs_lcd_draw_x(&screen, xpos, ypos, row, row_len);
             if (drawn_pixels <= 0) {
                 fprintf(stderr, "dcs_lcd_draw_x returned %d at (%d, %d)\n", drawn_pixels, xpos, ypos);
                 abort();
@@ -253,6 +258,7 @@ static void render(term display_list, uint16_t *frame)
         }
     }
 
+    free(row);
     display_items_delete(items, len);
 }
 

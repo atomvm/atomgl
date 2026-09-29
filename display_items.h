@@ -95,6 +95,19 @@ typedef enum
     DisplayItemsOutOfMemory
 } display_items_result_t;
 
+static inline size_t display_items_row(BaseDisplayItem items[], size_t items_len, int ypos,
+    BaseDisplayItem *row[])
+{
+    size_t row_len = 0;
+    for (size_t i = 0; i < items_len; i++) {
+        BaseDisplayItem *item = &items[i];
+        if ((ypos >= item->y) && (ypos < item->y + item->height)) {
+            row[row_len++] = item;
+        }
+    }
+    return row_len;
+}
+
 void display_items_init_item(BaseDisplayItem *item, term req, Context *ctx);
 
 display_items_result_t display_items_new_list(term display_list, BaseDisplayItem **items, size_t *items_len, Context *ctx);

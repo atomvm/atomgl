@@ -144,6 +144,12 @@ static void do_update(Context *ctx, term display_list)
     if (UNLIKELY(display_items_new_list(display_list, &items, &len, ctx) != DisplayItemsOk)) {
         return;
     }
+    BaseDisplayItem **row = malloc(sizeof(BaseDisplayItem *) * len);
+    if (UNLIKELY(len > 0 && !row)) {
+        fprintf(stderr, "do_update: failed to alloc row\n");
+        display_items_delete(items, len);
+        return;
+    }
 
     struct DCSLCDDriver *driver = DCS_LCD_DRIVER_FROM_CTX(ctx);
     int screen_width = driver->screen.w;
@@ -156,9 +162,10 @@ static void do_update(Context *ctx, term display_list)
     bool transaction_in_progress = false;
 
     for (int ypos = 0; ypos < screen_height; ypos++) {
+        size_t row_len = display_items_row(items, len, ypos, row);
         int xpos = 0;
         while (xpos < screen_width) {
-            int drawn_pixels = dcs_lcd_draw_x(&driver->screen, xpos, ypos, items, len);
+            int drawn_pixels = dcs_lcd_draw_x(&driver->screen, xpos, ypos, row, row_len);
             xpos += drawn_pixels;
         }
 
@@ -195,6 +202,7 @@ static void do_update(Context *ctx, term display_list)
 
     spi_device_release_bus(driver->bus.spi_disp.handle);
 
+    free(row);
     display_items_delete(items, len);
 }
 
