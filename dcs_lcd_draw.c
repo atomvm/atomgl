@@ -170,39 +170,37 @@ int dcs_lcd_draw_scaled_cropped_img_x(const struct DCSLCDScreen *screen,
     }
 
     int width = item->width;
-    const char *data = item->data.image_data_with_size.pix;
 
     int drawn_pixels = 0;
 
-    int y_scale = item->y_scale;
-    int x_scale = item->x_scale;
-    int img_width = item->data.image_data_with_size.width;
-
-    int source_x = item->source_x;
-    int source_y = item->source_y;
-
-    uint32_t *pixels = ((uint32_t *) data) + (source_y + ((ypos - y) / y_scale)) * img_width + source_x + ((xpos - x) / x_scale);
     uint16_t *pixmem16 = (uint16_t *) (((uint8_t *) screen->pixels) + xpos * sizeof(uint16_t));
 
     if (width > xpos - x + max_line_len) {
         width = xpos - x + max_line_len;
     }
 
-    for (int j = xpos - x; j < width; j++) {
-        uint32_t img_pixel = READ_32_UNALIGNED(pixels);
-        uint8_t alpha = rgba8888_get_alpha(img_pixel);
-        if (alpha == 0xFF) {
-            uint16_t color = uint32_color_to_surface(img_pixel);
-            pixmem16[drawn_pixels] = color;
-        } else if (visible_bg) {
-            uint16_t color = rgba8888_color_to_rgb565(img_pixel);
-            uint16_t blended = alpha_blend_rgb565(color, bgcolor, alpha);
-            pixmem16[drawn_pixels] = rgb565_color_to_surface(blended);
-        } else {
-            return drawn_pixels;
+    struct ScaledCroppedRow src;
+    display_items_scaled_cropped_row_init(&src, item, ypos - y);
+
+    int j = xpos - x;
+    while (j < width) {
+        int span_end = display_items_scaled_cropped_span(&src, j, width);
+        for (; j < span_end; j++) {
+            const uint32_t *pixels = display_items_scaled_cropped_row_pixel(&src, j);
+            uint32_t img_pixel = READ_32_UNALIGNED(pixels);
+            uint8_t alpha = rgba8888_get_alpha(img_pixel);
+            if (alpha == 0xFF) {
+                uint16_t color = uint32_color_to_surface(img_pixel);
+                pixmem16[drawn_pixels] = color;
+            } else if (visible_bg) {
+                uint16_t color = rgba8888_color_to_rgb565(img_pixel);
+                uint16_t blended = alpha_blend_rgb565(color, bgcolor, alpha);
+                pixmem16[drawn_pixels] = rgb565_color_to_surface(blended);
+            } else {
+                return drawn_pixels;
+            }
+            drawn_pixels++;
         }
-        drawn_pixels++;
-        pixels = ((uint32_t *) data) + (source_y + ((ypos - y) / y_scale)) * img_width + source_x + ((j + 1) / x_scale);
     }
 
     return drawn_pixels;

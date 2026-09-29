@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <defaultatoms.h>
 #include <interop.h>
 #include <utils.h>
 
@@ -191,6 +192,23 @@ static const char *init_scaled_cropped_image_item(BaseDisplayItem *item, term re
     }
     if (item->height > max_height) {
         item->height = max_height;
+    }
+
+    term flip_x = globalcontext_make_atom(ctx->global, ATOM_STR("\x6", "flip_x"));
+    term flip_y = globalcontext_make_atom(ctx->global, ATOM_STR("\x6", "flip_y"));
+    term opts = term_get_tuple_element(req, 10);
+    while (term_is_nonempty_list(opts)) {
+        term opt = term_get_list_head(opts);
+        if (term_is_tuple(opt) && term_get_tuple_arity(opt) == 2
+            && term_get_tuple_element(opt, 1) == TRUE_ATOM) {
+            opt = term_get_tuple_element(opt, 0);
+        }
+        if (opt == flip_x) {
+            item->flip_x = true;
+        } else if (opt == flip_y) {
+            item->flip_y = true;
+        }
+        opts = term_get_list_tail(opts);
     }
 
     item->primitive = PrimitiveScaledCroppedImage;
