@@ -30,6 +30,11 @@ if (NOT LIBATOMVM_INCLUDE_PATH)
     message(FATAL_ERROR "Set LIBATOMVM_INCLUDE_PATH to AtomVM's src/libAtomVM (headers only, nothing is linked)")
 endif()
 
+add_executable(bench bench.c ../../dcs_lcd_draw.c ../../font_data.c ../../shape.c)
+target_include_directories(bench PRIVATE ../.. ../stubs ${LIBATOMVM_INCLUDE_PATH})
+target_compile_definitions(bench PRIVATE HAVE_ATOMIC)
+target_compile_options(bench PRIVATE -Wall -Wextra -Wno-unused-parameter)
+
 add_executable(test_flip test_flip.c)
 target_include_directories(test_flip PRIVATE ../.. ../stubs ${LIBATOMVM_INCLUDE_PATH})
 target_compile_definitions(test_flip PRIVATE HAVE_ATOMIC)
