@@ -61,6 +61,10 @@
 #include "spi_dc_driver.h"
 #include "spi_display.h"
 
+#ifdef ATOMGL_PROFILE
+#include <esp_timer.h>
+#endif
+
 #define SPI_MODE 0
 
 #include "font_data.h"
@@ -139,11 +143,18 @@ static void display_init_using_list(struct DCSLCDDriver *driver, term init_list)
 
 static void do_update(Context *ctx, term display_list)
 {
+#ifdef ATOMGL_PROFILE
+    int64_t frame_start = esp_timer_get_time();
+#endif
+
     BaseDisplayItem *items;
     size_t len;
     if (UNLIKELY(display_items_new_list(display_list, &items, &len, ctx) != DisplayItemsOk)) {
         return;
     }
+#ifdef ATOMGL_PROFILE
+    int64_t parse_us = esp_timer_get_time() - frame_start;
+#endif
 
     struct DCSLCDDriver *driver = DCS_LCD_DRIVER_FROM_CTX(ctx);
     int screen_width = driver->screen.w;
@@ -155,18 +166,40 @@ static void do_update(Context *ctx, term display_list)
 
     bool transaction_in_progress = false;
 
+#ifdef ATOMGL_PROFILE
+    int64_t draw_us = 0;
+    int64_t max_line_us = 0;
+    int64_t spi_wait_us = 0;
+#endif
+
     for (int ypos = 0; ypos < screen_height; ypos++) {
+#ifdef ATOMGL_PROFILE
+        int64_t line_start = esp_timer_get_time();
+#endif
         int xpos = 0;
         while (xpos < screen_width) {
             int drawn_pixels = dcs_lcd_draw_x(&driver->screen, xpos, ypos, items, len);
             xpos += drawn_pixels;
         }
+#ifdef ATOMGL_PROFILE
+        int64_t line_us = esp_timer_get_time() - line_start;
+        draw_us += line_us;
+        if (line_us > max_line_us) {
+            max_line_us = line_us;
+        }
+#endif
 
         if (transaction_in_progress) {
             spi_transaction_t *trans;
             // I did a quick measurement, and most of the time is spent waiting for DMA transaction
             // eg. 23 us spent in draw_x, 188 us spent in spi_device_get_trans_result
+#ifdef ATOMGL_PROFILE
+            int64_t wait_start = esp_timer_get_time();
+#endif
             spi_device_get_trans_result(driver->bus.spi_disp.handle, &trans, portMAX_DELAY);
+#ifdef ATOMGL_PROFILE
+            spi_wait_us += esp_timer_get_time() - wait_start;
+#endif
         }
 
         // Swap scanline buffers.
@@ -190,12 +223,25 @@ static void do_update(Context *ctx, term display_list)
 
     if (transaction_in_progress) {
         spi_transaction_t *trans;
+#ifdef ATOMGL_PROFILE
+        int64_t wait_start = esp_timer_get_time();
+#endif
         spi_device_get_trans_result(driver->bus.spi_disp.handle, &trans, portMAX_DELAY);
+#ifdef ATOMGL_PROFILE
+        spi_wait_us += esp_timer_get_time() - wait_start;
+#endif
     }
 
     spi_device_release_bus(driver->bus.spi_disp.handle);
 
     display_items_delete(items, len);
+
+#ifdef ATOMGL_PROFILE
+    fprintf(stderr,
+        "atomgl: %zu items, parse %lld us, draw %lld us, max line %lld us, spi wait %lld us, frame %lld us\n",
+        len, (long long) parse_us, (long long) draw_us, (long long) max_line_us,
+        (long long) spi_wait_us, (long long) (esp_timer_get_time() - frame_start));
+#endif
 }
 
 static void process_message(Message *message, Context *ctx)
