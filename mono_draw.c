@@ -77,23 +77,6 @@ void mono_draw_pixel_x(const struct MonoScreen *screen,
     line_buf[xpos / 8] = (line_buf[xpos / 8] & ~(0x1 << bpos)) | (color << bpos);
 }
 
-int mono_find_max_line_len(const struct MonoScreen *screen,
-    BaseDisplayItem items[], size_t items_len, int xpos, int ypos)
-{
-    int line_len = screen->w - xpos;
-
-    for (size_t i = 0; i < items_len; i++) {
-        BaseDisplayItem *item = &items[i];
-
-        if ((xpos < item->x) && (ypos >= item->y) && (ypos < item->y + item->height)) {
-            int len_to_item = item->x - xpos;
-            line_len = (line_len > len_to_item) ? len_to_item : line_len;
-        }
-    }
-
-    return line_len;
-}
-
 int mono_draw_image_x(const struct MonoScreen *screen,
     uint8_t *line_buf, int xpos, int ypos, int max_line_len,
     BaseDisplayItem *item)
@@ -286,10 +269,6 @@ int mono_draw_scaled_cropped_img_x(const struct MonoScreen *screen,
 
     uint32_t *pixels = ((uint32_t *) data) + (source_y + ((ypos - y) / y_scale)) * img_width + source_x + ((xpos - x) / x_scale);
 
-    if (source_x + (width / x_scale) > img_width) {
-        width = (img_width - source_x) * x_scale;
-    }
-
     if (width > xpos - x + max_line_len) {
         width = xpos - x + max_line_len;
     }
@@ -322,15 +301,26 @@ int mono_draw_x(const struct MonoScreen *screen,
     uint8_t *line_buf, int xpos, int ypos,
     BaseDisplayItem items[], size_t items_len)
 {
+    int line_len = screen->w - xpos;
     bool below = false;
 
     for (size_t i = 0; i < items_len; i++) {
         BaseDisplayItem *item = &items[i];
-        if ((xpos < item->x) || (xpos >= item->x + item->width) || (ypos < item->y) || (ypos >= item->y + item->height)) {
+        if ((ypos < item->y) || (ypos >= item->y + item->height)) {
+            continue;
+        }
+        if (xpos < item->x) {
+            int len_to_item = item->x - xpos;
+            if (len_to_item < line_len) {
+                line_len = len_to_item;
+            }
+            continue;
+        }
+        if (xpos >= item->x + item->width) {
             continue;
         }
 
-        int max_line_len = below ? 1 : mono_find_max_line_len(screen, items, i, xpos, ypos);
+        int max_line_len = below ? 1 : line_len;
 
         int drawn_pixels = 0;
         switch (items[i].primitive) {
