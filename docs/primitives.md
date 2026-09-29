@@ -81,13 +81,19 @@ The item is invalid unless `0 <= SourceX < ImageWidth`, `0 <= SourceY < ImageHei
 factors are at least 1 and `Width` and `Height` are at least 0. `Width` and `Height` are reduced to
 what is left of the image right of and below the source offset, times the scale factor.
 
+`Opts` is a list. `flip_x` or `{flip_x, true}` mirrors the item horizontally, `flip_y` or
+`{flip_y, true}` vertically. Other entries are ignored, and so is an `Opts` that is not a list.
+A flip mirrors the drawn pixels in place, not the whole source image: with `flip_x`, the pixel at
+offset `C` from the item's left edge shows what the unflipped item shows at offset `Width - 1 - C`,
+also when `Width` is not a multiple of the scale factor.
+
 ```erlang
 {scaled_cropped_image,
   X, Y, Width, Height, % bounding rect in pixels
   BackgroundColor, % RGB background color, a "hex color" can be used here, or transparent atom
   SourceX, SourceY, % offset inside the source image from where the image is taken
   XScaleFactor, YScaleFactor, % integer scaling factor, 1 is original, 2 is twice, etc.
-  Opts, % option keyword list, always []: right now no additional options are supported
+  Opts, % option list: [flip_x], [flip_y], [flip_x, flip_y], or [] for none
   Image % image tuple
 }
 ```

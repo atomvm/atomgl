@@ -36,11 +36,6 @@ static inline uint16_t alpha_blend_rgb565(uint32_t fg, uint32_t bg, uint8_t alph
     return (uint16_t) ((result >> 16) | result);
 }
 
-static inline uint8_t rgba8888_get_alpha(uint32_t color)
-{
-    return color & 0xFF;
-}
-
 static inline uint16_t rgba8888_color_to_rgb565(uint32_t color)
 {
     uint8_t r = color >> 24;

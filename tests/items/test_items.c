@@ -156,6 +156,18 @@ static term rgba(avm_int_t w, avm_int_t h, term bin)
     return tuple(4, atom("rgba8888"), term_from_int(w), term_from_int(h), bin);
 }
 
+static term flips(bool flip_x, bool flip_y)
+{
+    term opts = term_nil();
+    if (flip_y) {
+        opts = cons(tuple(2, atom("flip_y"), TRUE_ATOM), opts);
+    }
+    if (flip_x) {
+        opts = cons(tuple(2, atom("flip_x"), TRUE_ATOM), opts);
+    }
+    return opts;
+}
+
 static term sci(avm_int_t w, avm_int_t h, avm_int_t sx, avm_int_t sy, avm_int_t xs, avm_int_t ys,
     term opts, term img)
 {
@@ -267,14 +279,15 @@ static void test_scaled_cropped_image_invalid(void)
     term ok_img = rgba(4, 2, pixels(32));
 
     for (int sy = 2; sy <= 4; sy++) {
+        expect_invalid("source_y >= image height, flip_y", sci(4, 2, 0, sy, 1, 1, flips(false, true), ok_img));
         expect_invalid("source_y >= image height", sci(4, 2, 0, sy, 1, 1, term_nil(), ok_img));
     }
-    expect_invalid("source_y huge", sci(4, 2, 0, 100000000, 1, 1, term_nil(), ok_img));
-    expect_invalid("source_x >= image width", sci(4, 2, 4, 0, 1, 1, term_nil(), ok_img));
+    expect_invalid("source_y huge, flip_y", sci(4, 2, 0, 100000000, 1, 1, flips(false, true), ok_img));
+    expect_invalid("source_x >= image width, flip_x", sci(4, 2, 4, 0, 1, 1, flips(true, false), ok_img));
     expect_invalid("source_x -1", sci(4, 1, -1, 0, 1, 1, term_nil(), ok_img));
     expect_invalid("source_y -1", sci(4, 2, 0, -1, 1, 1, term_nil(), ok_img));
     expect_invalid("image height 0, empty binary", sci(4, 1, 0, 0, 1, 1, term_nil(), rgba(4, 0, pixels(0))));
-    expect_invalid("image width 0", sci(4, 1, 0, 0, 1, 1, term_nil(), rgba(0, 1, pixels(0))));
+    expect_invalid("image width 0, flip_x", sci(4, 1, 0, 0, 1, 1, flips(true, false), rgba(0, 1, pixels(0))));
     expect_invalid("image width -1", sci(4, 1, 0, 0, 1, 1, term_nil(), rgba(-1, 1, pixels(16))));
     expect_invalid("binary shorter than W*H*4", sci(4, 4, 0, 0, 1, 1, term_nil(), rgba(4, 4, pixels(16))));
     expect_invalid("binary one byte short", sci(4, 2, 0, 0, 1, 1, term_nil(), rgba(4, 2, pixels(31))));
@@ -373,7 +386,7 @@ static void test_scaled_cropped_image_valid(void)
     BaseDisplayItem item;
     term bin = pixels(32);
     parse(tuple(12, atom("scaled_cropped_image"), term_from_int(5), term_from_int(6), term_from_int(7), term_from_int(8),
-              term_from_int(0xABCDEF), term_from_int(3), term_from_int(1), term_from_int(2), term_from_int(3), term_nil(),
+              term_from_int(0xABCDEF), term_from_int(3), term_from_int(1), term_from_int(2), term_from_int(3), flips(true, true),
               rgba(4, 2, bin)),
         &item);
     CHECK(item.primitive == PrimitiveScaledCroppedImage, "sci: primitive %d", item.primitive);
@@ -382,12 +395,43 @@ static void test_scaled_cropped_image_valid(void)
     CHECK(item.brcolor == 0xABCDEFFF, "sci: brcolor %#x", (unsigned) item.brcolor);
     CHECK(item.source_x == 3 && item.source_y == 1 && item.x_scale == 2 && item.y_scale == 3,
         "sci: source (%d, %d) scale (%d, %d)", item.source_x, item.source_y, item.x_scale, item.y_scale);
+    CHECK(item.flip_x && item.flip_y, "sci: flips %d %d", item.flip_x, item.flip_y);
     CHECK(item.data.image_data_with_size.width == 4 && item.data.image_data_with_size.height == 2
             && item.data.image_data_with_size.pix == term_binary_data(bin),
         "sci: image data");
     delete_item(&item);
 
-    parse(sci(9, 9, 3, 1, 3, 3, term_nil(), rgba(4, 2, pixels(32))), &item);
+    parse(sci(4, 2, 0, 0, 1, 1, list(2, tuple(2, atom("flip_x"), FALSE_ATOM), term_from_int(3)), rgba(4, 2, pixels(32))),
+        &item);
+    CHECK(item.primitive == PrimitiveScaledCroppedImage && !item.flip_x && !item.flip_y,
+        "sci with false/garbage opts: primitive %d flips %d %d", item.primitive, item.flip_x, item.flip_y);
+    delete_item(&item);
+
+    struct
+    {
+        const char *name;
+        term opts;
+        bool flip_x;
+        bool flip_y;
+    } opts[] = {
+        { "bare atoms", list(2, atom("flip_y"), atom("flip_x")), true, true },
+        { "bare flip_x", list(1, atom("flip_x")), true, false },
+        { "mixed forms", list(3, atom("flip_y"), tuple(2, atom("flip_x"), TRUE_ATOM), atom("other")), true, true },
+        { "{flip_y, 1}", list(1, tuple(2, atom("flip_y"), term_from_int(1))), false, false },
+        { "{flip_x}", list(1, tuple(1, atom("flip_x"))), false, false },
+        { "not a list", atom("flip_x"), false, false },
+        { "a tuple", tuple(2, atom("flip_x"), TRUE_ATOM), false, false },
+        { "improper tail", cons(atom("flip_y"), atom("flip_x")), false, true },
+    };
+    for (size_t i = 0; i < sizeof(opts) / sizeof(opts[0]); i++) {
+        parse(sci(4, 2, 0, 0, 1, 1, opts[i].opts, rgba(4, 2, pixels(32))), &item);
+        CHECK(item.primitive == PrimitiveScaledCroppedImage && item.flip_x == opts[i].flip_x
+                && item.flip_y == opts[i].flip_y,
+            "sci opts %s: primitive %d flips %d %d", opts[i].name, item.primitive, item.flip_x, item.flip_y);
+        delete_item(&item);
+    }
+
+    parse(sci(9, 9, 3, 1, 3, 3, flips(true, true), rgba(4, 2, pixels(32))), &item);
     CHECK(item.primitive == PrimitiveScaledCroppedImage, "sci at last pixel: primitive %d", item.primitive);
     delete_item(&item);
 }
@@ -804,6 +848,8 @@ struct Sprite
     int source_y;
     int x_scale;
     int y_scale;
+    bool flip_x;
+    bool flip_y;
     int img_width;
     int img_height;
     const uint8_t *bytes;
@@ -831,6 +877,12 @@ static bool sprite_pixel(const struct Sprite *s, int px, int py, uint16_t *color
     if (px < 0 || py < 0 || px >= drawn_w || py >= drawn_h) {
         return false;
     }
+    if (s->flip_x) {
+        px = drawn_w - 1 - px;
+    }
+    if (s->flip_y) {
+        py = drawn_h - 1 - py;
+    }
     int c = px / s->x_scale;
     int r = py / s->y_scale;
     *color = expected_color(s->bytes + 4 * ((s->source_y + r) * s->img_width + s->source_x + c));
@@ -843,8 +895,9 @@ static void check_sprite_pixels(const struct Sprite *s, int seed)
     static uint16_t frame[SCREEN_W * SCREEN_H];
     char name[160];
     snprintf(name, sizeof(name),
-        "sprite %dx%d from (%d, %d) of %dx%d, scale %dx%d, at (%d, %d)", s->width, s->height,
-        s->source_x, s->source_y, s->img_width, s->img_height, s->x_scale, s->y_scale, s->x, s->y);
+        "sprite %dx%d from (%d, %d) of %dx%d, scale %dx%d, flip %d %d, at (%d, %d)", s->width, s->height,
+        s->source_x, s->source_y, s->img_width, s->img_height, s->x_scale, s->y_scale, s->flip_x, s->flip_y,
+        s->x, s->y);
 
     memset(expected, 0, sizeof(expected));
     for (int y = 0; y < SCREEN_H; y++) {
@@ -857,7 +910,7 @@ static void check_sprite_pixels(const struct Sprite *s, int seed)
     term bin = term_from_const_binary(s->bytes, s->img_width * s->img_height * 4, &heap, &glb);
     term req = tuple(12, atom("scaled_cropped_image"), term_from_int(s->x), term_from_int(s->y), term_from_int(s->width),
         term_from_int(s->height), atom("transparent"), term_from_int(s->source_x), term_from_int(s->source_y),
-        term_from_int(s->x_scale), term_from_int(s->y_scale), term_nil(),
+        term_from_int(s->x_scale), term_from_int(s->y_scale), flips(s->flip_x, s->flip_y),
         rgba(s->img_width, s->img_height, bin));
 
     BaseDisplayItem item;
@@ -891,31 +944,35 @@ static void test_sprite_pixels(void)
             for (int crop = 0; crop < 3; crop++) {
                 for (int xs = 1; xs <= 3; xs++) {
                     for (int ys = 1; ys <= 3; ys++) {
-                        int rest_w = ImgW - sx;
-                        int rest_h = ImgH - sy;
-                        struct Sprite s;
-                        memset(&s, 0, sizeof(s));
-                        s.img_width = ImgW;
-                        s.img_height = ImgH;
-                        s.bytes = bytes;
-                        s.source_x = sx;
-                        s.source_y = sy;
-                        s.x_scale = xs;
-                        s.y_scale = ys;
-                        if (crop == 0) {
-                            s.width = (rest_w - 2) * xs - (xs - 1);
-                            s.height = (rest_h - 2) * ys - (ys - 1);
-                        } else if (crop == 1) {
-                            s.width = rest_w * xs;
-                            s.height = rest_h * ys;
-                        } else {
-                            s.width = rest_w * xs + 3;
-                            s.height = rest_h * ys + 2 * ys + 1;
+                        for (int f = 0; f < 4; f++) {
+                            int rest_w = ImgW - sx;
+                            int rest_h = ImgH - sy;
+                            struct Sprite s;
+                            memset(&s, 0, sizeof(s));
+                            s.img_width = ImgW;
+                            s.img_height = ImgH;
+                            s.bytes = bytes;
+                            s.source_x = sx;
+                            s.source_y = sy;
+                            s.x_scale = xs;
+                            s.y_scale = ys;
+                            s.flip_x = f & 1;
+                            s.flip_y = f & 2;
+                            if (crop == 0) {
+                                s.width = (rest_w - 2) * xs - (xs - 1);
+                                s.height = (rest_h - 2) * ys - (ys - 1);
+                            } else if (crop == 1) {
+                                s.width = rest_w * xs;
+                                s.height = rest_h * ys;
+                            } else {
+                                s.width = rest_w * xs + 3;
+                                s.height = rest_h * ys + 2 * ys + 1;
+                            }
+                            s.x = (seed % 5 == 4) ? -3 : 2 + seed % 7;
+                            s.y = (seed % 5 == 4) ? -2 : 1 + seed % 5;
+                            check_sprite_pixels(&s, seed);
+                            seed++;
                         }
-                        s.x = (seed % 5 == 4) ? -3 : 2 + seed % 7;
-                        s.y = (seed % 5 == 4) ? -2 : 1 + seed % 5;
-                        check_sprite_pixels(&s, seed);
-                        seed++;
                     }
                 }
             }
