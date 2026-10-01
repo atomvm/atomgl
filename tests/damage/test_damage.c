@@ -128,11 +128,66 @@ static void test_longer_list(void)
         damaged.y, damaged.width, damaged.height);
 }
 
+static void check_damage(const char *name, struct Rectangle damaged, int x, int y, int width,
+    int height)
+{
+    CHECK(damaged.valid && damaged.x == x && damaged.y == y && damaged.width == width
+            && damaged.height == height,
+        "%s: valid %d damage (%d, %d, %d, %d), expected (%d, %d, %d, %d)", name, damaged.valid,
+        damaged.x, damaged.y, damaged.width, damaged.height, x, y, width, height);
+}
+
+static void test_first_item_removed(void)
+{
+    BaseDisplayItem orig[] = { rect(0, 0, 4, 4), rect(10, 10, 2, 2) };
+    BaseDisplayItem new[] = { rect(10, 10, 2, 2) };
+    check_damage("first item removed", diff(orig, 2, new, 1), 0, 0, 4, 4);
+}
+
+static void test_middle_items_removed(void)
+{
+    BaseDisplayItem orig[] = { rect(0, 0, 1, 1), rect(20, 20, 2, 2), rect(30, 30, 3, 3),
+        rect(40, 40, 1, 1) };
+    BaseDisplayItem new[] = { rect(0, 0, 1, 1), rect(40, 40, 1, 1) };
+    check_damage("middle items removed", diff(orig, 4, new, 2), 20, 20, 13, 13);
+}
+
+static void test_last_item_removed(void)
+{
+    BaseDisplayItem orig[] = { rect(0, 0, 4, 4), rect(10, 10, 2, 2) };
+    BaseDisplayItem new[] = { rect(0, 0, 4, 4) };
+    check_damage("last item removed", diff(orig, 2, new, 1), 10, 10, 2, 2);
+}
+
+static void test_item_moved(void)
+{
+    BaseDisplayItem orig[] = { rect(0, 0, 4, 4) };
+    BaseDisplayItem new[] = { rect(10, 10, 4, 4) };
+    check_damage("item moved", diff(orig, 1, new, 1), 0, 0, 14, 14);
+}
+
+static void test_clip(void)
+{
+    struct Rectangle screen = { .x = 0, .y = 0, .width = 320, .height = 240, .valid = true };
+    struct Rectangle damaged = { .x = -5, .y = -8, .width = 10, .height = 20, .valid = true };
+    damage_clip(&damaged, &screen);
+    check_damage("clipped at the top left", damaged, 0, 0, 5, 12);
+
+    damaged = (struct Rectangle) { .x = 310, .y = 230, .width = 20, .height = 20, .valid = true };
+    damage_clip(&damaged, &screen);
+    check_damage("clipped at the bottom right", damaged, 310, 230, 10, 10);
+}
+
 int main(void)
 {
     test_same_list();
     test_scaled_cropped_image_changed();
     test_longer_list();
+    test_first_item_removed();
+    test_middle_items_removed();
+    test_last_item_removed();
+    test_item_moved();
+    test_clip();
 
     if (failures) {
         fprintf(stderr, "%d of %d checks failed\n", failures, checks);

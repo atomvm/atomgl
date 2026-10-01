@@ -66,10 +66,12 @@ static bool cmp_display_item(BaseDisplayItem *a, BaseDisplayItem *b)
 static void update_damaged_area(struct Rectangle *area, const struct Rectangle *damage)
 {
     if (area->valid) {
+        int right = int_max(area->x + area->width, damage->x + damage->width);
+        int bottom = int_max(area->y + area->height, damage->y + damage->height);
         area->x = int_min(area->x, damage->x);
         area->y = int_min(area->y, damage->y);
-        area->width = int_max(area->x + area->width, damage->x + damage->width) - area->x;
-        area->height = int_max(area->y + area->height, damage->y + damage->height) - area->y;
+        area->width = right - area->x;
+        area->height = bottom - area->y;
     } else {
         area->x = damage->x;
         area->y = damage->y;
@@ -81,10 +83,12 @@ static void update_damaged_area(struct Rectangle *area, const struct Rectangle *
 
 void damage_clip(struct Rectangle *rectangle, const struct Rectangle *clip_region)
 {
+    int right = int_min(rectangle->x + rectangle->width, clip_region->x + clip_region->width);
+    int bottom = int_min(rectangle->y + rectangle->height, clip_region->y + clip_region->height);
     rectangle->x = int_max(rectangle->x, clip_region->x);
     rectangle->y = int_max(rectangle->y, clip_region->y);
-    rectangle->width = int_min(rectangle->x + rectangle->width, clip_region->x + clip_region->width) - rectangle->x;
-    rectangle->height = int_min(rectangle->y + rectangle->height, clip_region->y + clip_region->height) - rectangle->y;
+    rectangle->width = right - rectangle->x;
+    rectangle->height = bottom - rectangle->y;
 }
 
 void damage_diff(BaseDisplayItem *orig, int orig_len, BaseDisplayItem *new, int new_len, struct Rectangle *damaged)
@@ -112,7 +116,7 @@ void damage_diff(BaseDisplayItem *orig, int orig_len, BaseDisplayItem *new, int 
             bool found = false;
             for (int k = j + 1; k < orig_len; k++) {
                 if (cmp_display_item(&new[i], &orig[k])) {
-                    for (int l = k - j; l < k; l++) {
+                    for (int l = j; l < k; l++) {
                         struct Rectangle irect = {
                             .x = orig[l].x,
                             .y = orig[l].y,
@@ -139,5 +143,16 @@ void damage_diff(BaseDisplayItem *orig, int orig_len, BaseDisplayItem *new, int 
                 update_damaged_area(damaged, &irect);
             }
         }
+    }
+
+    for (int l = j; l < orig_len; l++) {
+        struct Rectangle irect = {
+            .x = orig[l].x,
+            .y = orig[l].y,
+            .width = orig[l].width,
+            .height = orig[l].height,
+            .valid = true
+        };
+        update_damaged_area(damaged, &irect);
     }
 }
