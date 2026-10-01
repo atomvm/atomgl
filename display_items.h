@@ -33,6 +33,8 @@ static inline term context_make_atom(Context *ctx, AtomString string)
     return globalcontext_make_atom(ctx->global, string);
 }
 
+#define DISPLAY_ITEMS_COORD_LIMIT 32767
+
 typedef enum
 {
     PrimitiveInvalid = 0,
@@ -86,8 +88,16 @@ struct BaseDisplayItem
 
 typedef struct BaseDisplayItem BaseDisplayItem;
 
+typedef enum
+{
+    DisplayItemsOk = 0,
+    DisplayItemsNotAProperList,
+    DisplayItemsOutOfMemory
+} display_items_result_t;
+
 void display_items_init_item(BaseDisplayItem *item, term req, Context *ctx);
+
+display_items_result_t display_items_new_list(term display_list, BaseDisplayItem **items, size_t *items_len, Context *ctx);
 void display_items_delete(BaseDisplayItem items[], size_t items_len);
 
 #endif
-

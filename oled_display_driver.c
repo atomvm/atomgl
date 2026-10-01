@@ -96,19 +96,10 @@ static const struct OLEDDesc *oled_desc_for_compatible(const char *compat)
 
 static void do_update(Context *ctx, term display_list)
 {
-    int proper;
-    int len = term_list_length(display_list, &proper);
-
-    BaseDisplayItem *items = malloc(sizeof(BaseDisplayItem) * len);
-    if (UNLIKELY(!items)) {
-        fprintf(stderr, "do_update: failed to alloc items\n");
+    BaseDisplayItem *items;
+    size_t len;
+    if (UNLIKELY(display_items_new_list(display_list, &items, &len, ctx) != DisplayItemsOk)) {
         return;
-    }
-
-    term t = display_list;
-    for (int i = 0; i < len; i++) {
-        display_items_init_item(&items[i], term_get_list_head(t), ctx);
-        t = term_get_list_tail(t);
     }
 
     int screen_width = DISPLAY_WIDTH;
