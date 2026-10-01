@@ -464,23 +464,18 @@ static int draw_x(int xpos, int ypos, BaseDisplayItem items[], size_t items_len)
     return 1;
 }
 
-static void do_update(Context *ctx, term display_list)
+static bool do_update(Context *ctx, term display_list)
 {
-    int proper;
-    int len = term_list_length(display_list, &proper);
-
-    BaseDisplayItem *items = malloc(sizeof(BaseDisplayItem) * len);
-
-    term t = display_list;
-    for (int i = 0; i < len; i++) {
-        display_items_init_item(&items[i], term_get_list_head(t), ctx);
-        t = term_get_list_tail(t);
+    BaseDisplayItem *items;
+    size_t len;
+    if (UNLIKELY(display_items_new_list(display_list, &items, &len, ctx) != DisplayItemsOk)) {
+        return false;
     }
 
     struct Rectangle damaged;
     damaged.valid = false;
     dumb_diff(prev_items, prev_items_len, items, len, &damaged);
-    if (prev_items) {
+    if (prev_message) {
         display_items_delete(prev_items, prev_items_len);
         destroy_message(prev_message, ctx->global);
     }
@@ -489,7 +484,7 @@ static void do_update(Context *ctx, term display_list)
 
     if (!damaged.valid) {
         // skip update
-        return;
+        return true;
     }
 
     struct Rectangle screen_rect = {
@@ -516,6 +511,8 @@ static void do_update(Context *ctx, term display_list)
             xpos += drawn_pixels;
         }
     }
+
+    return true;
 }
 
 static void process_message(Context *ctx)
@@ -544,8 +541,9 @@ static void process_message(Context *ctx)
     if (cmd == globalcontext_make_atom(ctx->global, "\x6"
                                       "update")) {
         term display_list = term_get_tuple_element(req, 1);
-        do_update(ctx, display_list);
-        prev_message = message;
+        if (do_update(ctx, display_list)) {
+            prev_message = message;
+        }
 
         // Copy and scale up
         int scale = screen->scale;

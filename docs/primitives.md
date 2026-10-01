@@ -14,11 +14,43 @@ represented as an Erlang tuple with specific parameters defining its appearance 
 ### Colors
 Colors are represented as 24-bit RGB values. For example, `0xFF0000` represents red (equivalent to
 HTML color `#FF0000`). Display drivers for monochrome devices may apply dithering, while 16-bit
-displays may reduce color depth as needed.
+displays may reduce color depth as needed. A color can be any integer, but only its low 24 bits are
+used: `16#1FF0000` is the same red and `-1` is white.
 
 ### Coordinates and Sizes
-All numeric values are integers. Coordinates are specified in pixels, as are sizes. Subpixel or
-half-pixel values are not allowed.
+All numeric values are integers, of any size AtomVM can represent up to 64 bits. Coordinates are
+specified in pixels, as are sizes. Subpixel or half-pixel values are not allowed.
+
+- `rect` and `text` accept any coordinate and size. Values beyond ±32767 are clamped to that range
+  without changing which pixels are drawn on screen, so `{rect, 0, 0, 100000, 100000, Color}`
+  still fills the screen. A `rect` with a width or height of 0 or less draws nothing.
+- `image` and `scaled_cropped_image` coordinates, sizes, source offsets and scale factors, and
+  image widths and heights must be within ±32767, or the item is invalid.
+
+### Invalid Items
+An item with a wrong arity, a value of the wrong type or out of range, or an unknown command is
+skipped: it draws nothing and the rest of the display list is drawn as usual. Each skipped item is
+logged to stderr, one line per item:
+
+```
+invalid display list item N (Command/Arity): Reason
+```
+
+`N` is the item's position in the display list, starting at 1. `(Command/Arity)` is left out when
+the item is not a tuple, and `Command` is `tuple` when the first element is not an atom. For
+example:
+
+```
+invalid display list item 2 (rect/5): wrong arity
+invalid display list item 3: not a command tuple
+invalid display list item 4 (tuple/2): unknown command
+```
+
+At most 3 invalid items are logged per update. If there are more, one more line gives their number,
+such as `2 more invalid display list items`.
+
+An empty display list draws only the background. A display list that is not a proper list is
+rejected with `invalid display list: not a proper list` and the update is skipped.
 
 ### Transparent
 The `transparent` atom indicates that no background is drawn for the item's bounding rectangle,
@@ -45,6 +77,9 @@ itself.
 ## scaled_cropped_image
 
 Displays a portion of an image with scaling applied. Useful for sprite sheets or zoomed views.
+The item is invalid unless `0 <= SourceX < ImageWidth`, `0 <= SourceY < ImageHeight`, the scale
+factors are at least 1 and `Width` and `Height` are at least 0. `Width` and `Height` are reduced to
+what is left of the image right of and below the source offset, times the scale factor.
 
 ```erlang
 {scaled_cropped_image,
@@ -70,7 +105,11 @@ Draws a filled rectangle with the specified color.
 
 ## text
 
-Renders text with the specified font and colors.
+Renders text with the specified font and colors. `Font` must be an atom, or the item is invalid.
+With the built-in font the text is 8 pixels wide per character and 16 pixels high. On builds
+without ufont support, a font other than `default16px` falls back to the built-in font and logs
+`unsupported font: Font` on every update. With ufont support, a font that was not registered makes
+the item invalid.
 
 ```erlang
 {text,
@@ -96,8 +135,10 @@ The format tag indicates the pixel format. For example, `rgba8888` means:
 - Byte order: R, G, B, A
 - Each component is 8 bits
 
-**Important:** Width and height must exactly match the dimensions of the image data in the binary.
-Incorrect values will result in corrupted image display.
+Only `rgba8888` is supported. Width and height must be between 1 and 32767 and the binary must hold
+at least `Width * Height * 4` bytes, otherwise the item is invalid. Width and height must match the
+dimensions of the image data in the binary; wrong values that pass this check draw a corrupted
+image.
 
 **Tip:** You can convert images to raw RGBA format using ImageMagick:
 ```bash
