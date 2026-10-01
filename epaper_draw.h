@@ -43,9 +43,6 @@ int epaper_draw_scaled_cropped_img_x(const struct EpaperScreen *screen,
     uint8_t *line_buf, int xpos, int ypos, int max_line_len,
     BaseDisplayItem *item);
 
-int epaper_find_max_line_len(const struct EpaperScreen *screen,
-    BaseDisplayItem items[], size_t items_len, int xpos, int ypos);
-
 int epaper_draw_x(const struct EpaperScreen *screen,
     uint8_t *line_buf, int xpos, int ypos,
     BaseDisplayItem items[], size_t items_len);
