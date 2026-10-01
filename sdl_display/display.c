@@ -42,6 +42,7 @@
 #include "../display_message.h"
 #include "../font_data.h"
 #include "../image_helpers.h"
+#include "damage.h"
 
 struct DisplayOpts
 {
@@ -62,15 +63,6 @@ struct MouseEvent
     int button;
     int x;
     int y;
-};
-
-struct Rectangle
-{
-    int x;
-    int y;
-    int width;
-    int height;
-    bool valid;
 };
 
 static term keyboard_pid;
@@ -105,124 +97,6 @@ static void destroy_message(Message *m, GlobalContext *global)
     BEGIN_WITH_STACK_HEAP(1, temp_heap);
     mailbox_message_dispose(&m->base, &temp_heap);
     END_WITH_STACK_HEAP(temp_heap, global);
-}
-
-static inline int int_min(int a, int b)
-{
-    return (a > b) ? b : a;
-}
-
-static inline int int_max(int a, int b)
-{
-    return (a > b) ? a : b;
-}
-
-static bool cmp_display_item(BaseDisplayItem *a, BaseDisplayItem *b)
-{
-    if (a->primitive != b->primitive || a->x != b->x || a->y != b->y ||
-            a->width != b->width || a->height != b->height || a->brcolor != b->brcolor) {
-        return false;
-    }
-
-    switch (a->primitive) {
-        case PrimitiveImage:
-            return a->data.image_data.pix == b->data.image_data.pix;
-
-        case PrimitiveRect:
-            return true;
-
-        case PrimitiveText:
-            return (a->data.text_data.fgcolor == b->data.text_data.fgcolor) &&
-                !strcmp(a->data.text_data.text, b->data.text_data.text);
-
-        case PrimitiveScaledCroppedImage:
-            return (a->data.image_data.pix == b->data.image_data.pix) &&
-                (a->x_scale == b->x_scale) && (a->y_scale == b->y_scale) &&
-                (a->source_x == b->source_x) && (a->source_y == b->source_y);
-
-        default: {
-            return true;
-        }
-    }
-}
-
-static void update_damaged_area(struct Rectangle *area, const struct Rectangle *damage)
-{
-    if (area->valid) {
-        area->x = int_min(area->x, damage->x);
-        area->y = int_min(area->y, damage->y);
-        area->width = int_max(area->x + area->width, damage->x + damage->width) - area->x;
-        area->height = int_max(area->y + area->height, damage->y + damage->height) - area->y;
-    } else {
-        area->x = damage->x;
-        area->y = damage->y;
-        area->width = damage->width;
-        area->height = damage->height;
-        area->valid = true;
-    }
-}
-
-static void clip_rectangle(struct Rectangle *rectangle, const struct Rectangle *clip_region)
-{
-    rectangle->x = int_max(rectangle->x, clip_region->x);
-    rectangle->y = int_max(rectangle->y, clip_region->y);
-    rectangle->width = int_min(rectangle->x + rectangle->width, clip_region->x + clip_region->width) - rectangle->x;
-    rectangle->height = int_min(rectangle->y + rectangle->height, clip_region->y + clip_region->height) - rectangle->y;
-}
-
-static void dumb_diff(BaseDisplayItem *orig, int orig_len, BaseDisplayItem *new, int new_len, struct Rectangle *damaged)
-{
-    if (orig_len == 0) {
-        for (int i = 0; i < new_len; i++) {
-            struct Rectangle irect = {
-                .x = new[i].x,
-                .y = new[i].y,
-                .width = new[i].width,
-                .height = new[i].height,
-                .valid = true
-            };
-            update_damaged_area(damaged, &irect);
-        }
-        return;
-    }
-
-    int j = 0;
-
-    for (int i = 0; i < new_len; i++) {
-        if (cmp_display_item(&new[i], &orig[j])) {
-            j++;
-        } else {
-            bool found = false;
-            for (int k = j + 1; k < orig_len; k++) {
-                if (cmp_display_item(&new[i], &orig[k])) {
-                    for (int l = k - j; l < k; l++) {
-                        struct Rectangle irect = {
-                            .x = orig[l].x,
-                            .y = orig[l].y,
-                            .width = orig[l].width,
-                            .height = orig[l].height,
-                            .valid = true
-                        };
-                        update_damaged_area(damaged, &irect);
-                    }
-
-                    j = k + 1;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                struct Rectangle irect = {
-                    .x = new[i].x,
-                    .y = new[i].y,
-                    .width = new[i].width,
-                    .height = new[i].height,
-                    .valid = true
-                };
-                update_damaged_area(damaged, &irect);
-            }
-        }
-    }
 }
 
 static inline Uint32 uint32_color_to_surface(struct Screen *screen, uint32_t color)
@@ -474,7 +348,7 @@ static bool do_update(Context *ctx, term display_list)
 
     struct Rectangle damaged;
     damaged.valid = false;
-    dumb_diff(prev_items, prev_items_len, items, len, &damaged);
+    damage_diff(prev_items, prev_items_len, items, len, &damaged);
     if (prev_message) {
         display_items_delete(prev_items, prev_items_len);
         destroy_message(prev_message, ctx->global);
@@ -494,7 +368,7 @@ static bool do_update(Context *ctx, term display_list)
         .height = screen->h,
         .valid = true
     };
-    clip_rectangle(&damaged, &screen_rect);
+    damage_clip(&damaged, &screen_rect);
 
     // BUG: damage area is not correct
     // WORKAROUND: always damage the whole screen to force full redraw
