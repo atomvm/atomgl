@@ -25,8 +25,8 @@ specified in pixels, as are sizes. Subpixel or half-pixel values are not allowed
   without changing which pixels are drawn on screen, so `{rect, 0, 0, 100000, 100000, Color}`
   still fills the screen. A `rect` with a width or height of 0 or less draws nothing.
 - `image` and `scaled_cropped_image` coordinates, sizes, source offsets and scale factors, image
-  widths and heights, and every value of a shape (coordinates, sizes and radii) must be within
-  ±32767, or the item is invalid.
+  widths and heights, and every value of a shape (coordinates, sizes, radii and thicknesses) must
+  be within ±32767, or the item is invalid.
 
 ### Invalid Items
 An item with a wrong arity, a value of the wrong type or out of range, or an unknown command is
@@ -63,10 +63,11 @@ Text can be provided as either an Erlang string (a list) or an Elixir string (a 
 encoding is supported.
 
 ### Shapes
-Shape primitives (`rounded_rect`, `circle`, `ellipse`) paint only the pixels inside the shape;
-pixels in the bounding box but outside the shape show whatever item is below in the display list.
+Shape primitives (`rounded_rect`, `line`, `circle`, `ellipse`) paint only the pixels inside the
+shape; pixels in the bounding box but outside the shape show whatever item is below in the display
+list.
 
-`circle` and `ellipse` place their points on pixel centers: the pixel at `{X, Y}` is
+`line`, `circle` and `ellipse` place their points on pixel centers: the pixel at `{X, Y}` is
 drawn when it is inside. Round edges use the midpoint rule: a pixel at offset `{DX, DY}` from the
 center is inside a radius `R` when `DX * DX + DY * DY < R * R + R`, so a shape of radius `R` is
 `2 * R + 1` pixels across and a circle of radius 1 is a 5 pixel plus. An ellipse applies the same
@@ -152,6 +153,30 @@ a 12 pixel high button gets a radius of at most 5.
   Color % RGB fill color
 }
 ```
+
+## line
+
+Draws a straight line of any angle, covering both endpoints.
+
+```erlang
+{line,
+  X1, Y1, X2, Y2, % endpoints in pixels
+  Thickness, % line width in pixels, >= 1
+  Color % RGB line color
+}
+```
+
+A line is `Thickness` pixels thick measured along its minor axis: a line that is wider than it is
+tall covers `Thickness` pixels in every column from `X1` to `X2`, and a taller line `Thickness`
+pixels in every row from `Y1` to `Y2`. A 1 pixel line has one pixel per column (or row) and no
+gaps. With an even thickness the extra pixel goes above (or left of) the ideal line. From thickness
+3 on, both ends get a round cap: a disc `Thickness` pixels across, centered on the line's body, that
+reaches `(Thickness - 1) div 2` pixels past the endpoint and never sticks out above or below the
+line. With an even thickness the body, and so the cap, is centered half a pixel above (or left of)
+the endpoint: a horizontal line of thickness 4 from `{0, 0}` to `{4, 0}` is a 7 by 4 block covering
+columns -1 to 5 and rows -2 to 1. A line with equal endpoints is a disc of radius
+`(Thickness - 1) div 2` on that point, drawn with the midpoint rule (a single pixel for thickness 1
+or 2).
 
 ## circle
 

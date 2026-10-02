@@ -267,6 +267,216 @@ static void test_rounded_rect_invalid(void)
     CHECK(shape_new_rounded_rect(0, 0, 5, 5, -1) == NULL);
 }
 
+static void test_line_horizontal_thickness(void)
+{
+    struct ShapeData *s;
+    CHECK((s = shape_new_line(0, 0, 4, 0, 1)) != NULL);
+    CHECK_BOUNDS(s, 0, 0, 5, 1);
+    CHECK_RENDER(s, "#####\n");
+    shape_destroy(s);
+
+    CHECK((s = shape_new_line(0, 0, 4, 0, 2)) != NULL);
+    CHECK_BOUNDS(s, 0, -1, 5, 2);
+    CHECK_RENDER(s,
+        "#####\n"
+        "#####\n");
+    shape_destroy(s);
+
+    CHECK((s = shape_new_line(0, 0, 4, 0, 3)) != NULL);
+    CHECK_BOUNDS(s, -1, -1, 7, 3);
+    CHECK_RENDER(s,
+        ".#####.\n"
+        "#######\n"
+        ".#####.\n");
+    shape_destroy(s);
+
+    CHECK((s = shape_new_line(0, 0, 0, 2, 2)) != NULL);
+    CHECK_BOUNDS(s, -1, 0, 2, 3);
+    CHECK_RENDER(s,
+        "##\n"
+        "##\n"
+        "##\n");
+    shape_destroy(s);
+}
+
+static void test_line_even_caps(void)
+{
+    struct ShapeData *s;
+    CHECK((s = shape_new_line(0, 0, 4, 0, 4)) != NULL);
+    CHECK_BOUNDS(s, -1, -2, 7, 4);
+    CHECK_RENDER(s,
+        "#######\n"
+        "#######\n"
+        "#######\n"
+        "#######\n");
+    shape_destroy(s);
+
+    CHECK((s = shape_new_line(0, 0, 4, 0, 6)) != NULL);
+    CHECK_BOUNDS(s, -2, -3, 9, 6);
+    CHECK_RENDER(s,
+        ".#######.\n"
+        "#########\n"
+        "#########\n"
+        "#########\n"
+        "#########\n"
+        ".#######.\n");
+    shape_destroy(s);
+
+    CHECK((s = shape_new_line(0, 0, 0, 4, 4)) != NULL);
+    CHECK_BOUNDS(s, -2, -1, 4, 7);
+    CHECK_RENDER(s,
+        "####\n"
+        "####\n"
+        "####\n"
+        "####\n"
+        "####\n"
+        "####\n"
+        "####\n");
+    shape_destroy(s);
+
+    CHECK((s = shape_new_line(0, 4, 0, 0, 6)) != NULL);
+    CHECK_BOUNDS(s, -3, -2, 6, 9);
+    CHECK_RENDER(s,
+        ".####.\n"
+        "######\n"
+        "######\n"
+        "######\n"
+        "######\n"
+        "######\n"
+        "######\n"
+        "######\n"
+        ".####.\n");
+    shape_destroy(s);
+
+    CHECK((s = shape_new_line(0, 0, 5, 5, 2)) != NULL);
+    CHECK_BOUNDS(s, 0, -1, 6, 7);
+    CHECK_RENDER(s,
+        "#.....\n"
+        "##....\n"
+        ".##...\n"
+        "..##..\n"
+        "...##.\n"
+        "....##\n"
+        ".....#\n");
+    shape_destroy(s);
+
+    CHECK((s = shape_new_line(0, 0, 5, 5, 4)) != NULL);
+    CHECK_BOUNDS(s, -1, -2, 8, 9);
+    CHECK_RENDER(s,
+        "###.....\n"
+        "###.....\n"
+        "####....\n"
+        "#####...\n"
+        "..####..\n"
+        "...#####\n"
+        "....####\n"
+        ".....###\n"
+        ".....###\n");
+    shape_destroy(s);
+
+    CHECK((s = shape_new_line(5, 5, 0, 0, 6)) != NULL);
+    CHECK_BOUNDS(s, -2, -3, 10, 11);
+    CHECK_RENDER(s,
+        ".###......\n"
+        "#####.....\n"
+        "#####.....\n"
+        "######....\n"
+        "#######...\n"
+        ".########.\n"
+        "...#######\n"
+        "....######\n"
+        ".....#####\n"
+        ".....#####\n"
+        "......###.\n");
+    shape_destroy(s);
+}
+
+static void test_line_diagonal_connected(void)
+{
+    struct ShapeData *s;
+    CHECK((s = shape_new_line(0, 0, 10, 10, 1)) != NULL);
+    CHECK_BOUNDS(s, 0, 0, 11, 11);
+    for (int y = 0; y <= 10; y++) {
+        for (int x = 0; x <= 10; x++) {
+            CHECK(shape_contains(s, x, y) == (x == y));
+        }
+    }
+    shape_destroy(s);
+}
+
+static void test_line_shallow_one_pixel_per_column(void)
+{
+    struct ShapeData *s;
+    CHECK((s = shape_new_line(0, 0, 20, 10, 1)) != NULL);
+    CHECK_BOUNDS(s, 0, 0, 21, 11);
+    int count = 0;
+    for (int y = 0; y <= 10; y++) {
+        for (int x = 0; x <= 20; x++) {
+            bool in = shape_contains(s, x, y);
+            CHECK(in == (y == x / 2));
+            count += in ? 1 : 0;
+        }
+    }
+    CHECK(count == 21);
+    shape_destroy(s);
+}
+
+static void test_line_thick_sloped(void)
+{
+    struct ShapeData *s;
+    CHECK((s = shape_new_line(0, 0, 12, 5, 3)) != NULL);
+    CHECK_BOUNDS(s, -1, -1, 15, 8);
+    CHECK_RENDER(s,
+        ".##............\n"
+        "#####..........\n"
+        ".#######.......\n"
+        "...#######.....\n"
+        ".....#######...\n"
+        "........######.\n"
+        "..........#####\n"
+        "............##.\n");
+    shape_destroy(s);
+}
+
+static void test_line_reversed_is_same(void)
+{
+    struct ShapeData *a;
+    struct ShapeData *b;
+    CHECK((a = shape_new_line(-3, 7, 12, -4, 4)) != NULL);
+    CHECK((b = shape_new_line(12, -4, -3, 7, 4)) != NULL);
+    CHECK(same_pixels(a, b));
+    shape_destroy(a);
+    shape_destroy(b);
+}
+
+static void test_line_zero_length_is_dot(void)
+{
+    struct ShapeData *s;
+    CHECK((s = shape_new_line(5, 5, 5, 5, 1)) != NULL);
+    CHECK_BOUNDS(s, 5, 5, 1, 1);
+    CHECK(shape_contains(s, 5, 5));
+    CHECK(!shape_contains(s, 6, 5));
+    shape_destroy(s);
+
+    CHECK((s = shape_new_line(5, 5, 5, 5, 2)) != NULL);
+    CHECK_BOUNDS(s, 5, 5, 1, 1);
+    CHECK_RENDER(s, "#\n");
+    shape_destroy(s);
+
+    struct ShapeData *disc;
+    CHECK((s = shape_new_line(5, 5, 5, 5, 5)) != NULL);
+    CHECK((disc = shape_new_ellipse(5, 5, 2, 2)) != NULL);
+    CHECK_BOUNDS(s, 3, 3, 5, 5);
+    CHECK(same_pixels(s, disc));
+    shape_destroy(s);
+    shape_destroy(disc);
+}
+
+static void test_line_invalid(void)
+{
+    CHECK(shape_new_line(0, 0, 4, 4, 0) == NULL);
+}
+
 static void test_negative_coordinates(void)
 {
     struct ShapeData *s;
@@ -299,7 +509,7 @@ static void test_equal(void)
     CHECK((b = shape_new_ellipse(1, 2, 3, 5)) != NULL);
     CHECK(!shape_equal(a, b));
     shape_destroy(b);
-    CHECK((b = shape_new_rounded_rect(1, 2, 3, 4, 1)) != NULL);
+    CHECK((b = shape_new_line(1, 2, 3, 4, 1)) != NULL);
     CHECK(!shape_equal(a, b));
     shape_destroy(a);
     shape_destroy(b);
@@ -311,6 +521,10 @@ static void test_large_values(void)
     CHECK((s = shape_new_ellipse(0, 0, 10000, 10000)) != NULL);
     CHECK(shape_contains(s, 10000, 0));
     CHECK(!shape_contains(s, 10000, 10000));
+    shape_destroy(s);
+    CHECK((s = shape_new_line(-2000, -2000, 2000, 2000, 3)) != NULL);
+    CHECK(shape_contains(s, 1234, 1234));
+    CHECK(!shape_contains(s, 1234, -1234));
     shape_destroy(s);
 }
 
@@ -390,6 +604,9 @@ static void test_run_outside_bbox(void)
     CHECK((s = shape_new_ellipse(-5, 7, 9, 4)) != NULL);
     check_run_outside_bbox(s, __LINE__);
     shape_destroy(s);
+    CHECK((s = shape_new_line(0, 0, 50, 13, 5)) != NULL);
+    check_run_outside_bbox(s, __LINE__);
+    shape_destroy(s);
 }
 
 static void test_runs_match_contains(void)
@@ -408,6 +625,15 @@ static void test_runs_match_contains(void)
         { 0, 0, 1, 1, 0 }, { 2, 2, 40, 12, 6 } };
     for (size_t i = 0; i < sizeof(rects) / sizeof(rects[0]); i++) {
         CHECK((s = shape_new_rounded_rect(rects[i][0], rects[i][1], rects[i][2], rects[i][3], rects[i][4])) != NULL);
+        CHECK_RUNS(s);
+        shape_destroy(s);
+    }
+
+    int lines[][5] = { { 0, 0, 4, 0, 1 }, { 0, 0, 4, 0, 3 }, { 0, 0, 9, 3, 1 }, { 0, 0, 3, 9, 2 },
+        { 9, 0, 0, 5, 4 }, { 5, 5, 5, 5, 1 }, { 0, 0, 0, 8, 3 }, { -3, 7, 12, -4, 5 },
+        { 0, 0, 40, 1, 1 }, { 0, 0, 1, 40, 1 }, { 20, 3, -20, 9, 2 } };
+    for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); i++) {
+        CHECK((s = shape_new_line(lines[i][0], lines[i][1], lines[i][2], lines[i][3], lines[i][4])) != NULL);
         CHECK_RUNS(s);
         shape_destroy(s);
     }
@@ -456,6 +682,158 @@ static void test_rounded_rect_runs_random(void)
         CHECK_RUNS(s);
         CHECK(is_symmetric(s));
         shape_destroy(s);
+    }
+}
+
+static bool ref_line_contains(int x1, int y1, int x2, int y2, int t, int x, int y)
+{
+    if (x1 == x2 && y1 == y2) {
+        long long r = (t - 1) / 2;
+        long long dx = x - x1;
+        long long dy = y - y1;
+        return (dx == 0 && dy == 0) || dx * dx + dy * dy < r * r + r;
+    }
+    bool x_major = llabs((long long) x2 - x1) >= llabs((long long) y2 - y1);
+    long long ea[2] = { x_major ? x1 : y1, x_major ? x2 : y2 };
+    long long eb[2] = { x_major ? y1 : x1, x_major ? y2 : x2 };
+    for (int i = 0; i < 2; i++) {
+        long long u = 2 * ((x_major ? x : y) - ea[i]);
+        long long v = 2 * ((x_major ? y : x) - eb[i]) + (t % 2 == 0 ? 1 : 0);
+        if (u * u + v * v < (long long) t * t - 1) {
+            return true;
+        }
+    }
+    long long a1 = x_major ? x1 : y1;
+    long long b1 = x_major ? y1 : x1;
+    long long a2 = x_major ? x2 : y2;
+    long long b2 = x_major ? y2 : x2;
+    long long a = x_major ? x : y;
+    long long b = x_major ? y : x;
+    if (a1 == a2 || a < (a1 < a2 ? a1 : a2) || a > (a1 < a2 ? a2 : a1)) {
+        return false;
+    }
+    long long da = a2 - a1;
+    long long o2 = 2 * ((b - b1) * da - (a - a1) * (b2 - b1));
+    if (da < 0) {
+        da = -da;
+        o2 = -o2;
+    }
+    return -t * da <= o2 && o2 < t * da;
+}
+
+static bool line_matches_reference(struct ShapeData *s, int x1, int y1, int x2, int y2, int t)
+{
+    int margin = t + 2;
+    int lo_x = (x1 < x2 ? x1 : x2) - margin;
+    int hi_x = (x1 < x2 ? x2 : x1) + margin;
+    int lo_y = (y1 < y2 ? y1 : y2) - margin;
+    int hi_y = (y1 < y2 ? y2 : y1) + margin;
+    for (int y = lo_y; y <= hi_y; y++) {
+        for (int x = lo_x; x <= hi_x; x++) {
+            if (shape_contains(s, x, y) != ref_line_contains(x1, y1, x2, y2, t, x, y)) {
+                fprintf(stderr, "line (%d,%d)-(%d,%d) T=%d differs from the reference at (%d,%d)\n",
+                    x1, y1, x2, y2, t, x, y);
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static void check_line_properties(int x1, int y1, int x2, int y2, int t)
+{
+    struct ShapeData *s;
+    CHECK((s = shape_new_line(x1, y1, x2, y2, t)) != NULL);
+    int bx, by, bw, bh;
+    shape_bounds(s, &bx, &by, &bw, &bh);
+    int dx = abs(x2 - x1);
+    int dy = abs(y2 - y1);
+    bool x_major = dx >= dy;
+    int a_lo = x_major ? bx : by;
+    int a_hi = x_major ? bx + bw : by + bh;
+    int b_lo = x_major ? by : bx;
+    int b_hi = x_major ? by + bh : bx + bw;
+    int a1 = x_major ? (x1 < x2 ? x1 : x2) : (y1 < y2 ? y1 : y2);
+    int a2 = x_major ? (x1 < x2 ? x2 : x1) : (y1 < y2 ? y2 : y1);
+    bool ok = true;
+    int prev_first = 0;
+    for (int a = a_lo - 1; a <= a_hi && ok; a++) {
+        int count = 0;
+        int first = 0;
+        int last = 0;
+        for (int b = b_lo - 1; b <= b_hi; b++) {
+            bool in = x_major ? shape_contains(s, a, b) : shape_contains(s, b, a);
+            if (in) {
+                if (count == 0) {
+                    first = b;
+                }
+                last = b;
+                count++;
+            }
+        }
+        bool in_range = a >= a1 && a <= a2;
+        if (t <= 2 && a1 != a2) {
+            ok = count == (in_range ? t : 0);
+        } else if (in_range && a1 != a2) {
+            ok = count >= t;
+        }
+        ok = ok && (count == 0 || last - first + 1 == count);
+        if (ok && t == 1 && in_range && a > a1) {
+            ok = abs(first - prev_first) <= 1;
+        }
+        prev_first = first;
+    }
+    ok = ok && shape_contains(s, x1, y1) && shape_contains(s, x2, y2);
+    ok = ok && line_matches_reference(s, x1, y1, x2, y2, t);
+    if (a1 == a2) {
+        struct ShapeData *disc;
+        int dr = (t - 1) / 2;
+        if (dr > 0) {
+            CHECK((disc = shape_new_ellipse(x1, y1, dr, dr)) != NULL);
+            ok = ok && same_pixels(s, disc);
+            shape_destroy(disc);
+        } else {
+            ok = ok && bw == 1 && bh == 1;
+        }
+    }
+    if (!ok) {
+        fprintf(stderr, "%s:%d: line (%d,%d)-(%d,%d) T=%d violates line properties\n", __FILE__,
+            __LINE__, x1, y1, x2, y2, t);
+        failures++;
+    }
+    CHECK_RUNS(s);
+
+    struct ShapeData *r;
+    CHECK((r = shape_new_line(x2, y2, x1, y1, t)) != NULL);
+    CHECK(same_pixels(s, r));
+    shape_destroy(r);
+    shape_destroy(s);
+}
+
+static void test_line_runs_random(void)
+{
+    for (int i = 0; i < 2000; i++) {
+        int major = rng_range(0, 80);
+        int minor = rng_range(-major, major);
+        int dx = rng_range(0, 1) ? major : -major;
+        int dy = minor;
+        if (rng_range(0, 1)) {
+            int tmp = dx;
+            dx = dy;
+            dy = tmp;
+        }
+        int x1 = rng_range(-30, 30);
+        int y1 = rng_range(-30, 30);
+        check_line_properties(x1, y1, x1 + dx, y1 + dy, rng_range(1, 9));
+    }
+    for (int t = 1; t <= 4; t++) {
+        check_line_properties(0, 0, 17, 17, t);
+        check_line_properties(0, 0, -17, 17, t);
+        check_line_properties(0, 0, 17, 16, t);
+        check_line_properties(0, 0, 16, 17, t);
+        check_line_properties(0, 0, 0, -9, t);
+        check_line_properties(0, 0, 1, 0, t);
+        check_line_properties(0, 0, 0, 0, t);
     }
 }
 
@@ -562,6 +940,24 @@ static void test_extreme_values(void)
             }
         }
     }
+
+    const int ends[] = { -lim, 0, lim };
+    const int thick[] = { 1, 2, 3, 4, lim - 1, lim };
+    for (int p = 0; p < 9; p++) {
+        for (int q = 0; q < 9; q++) {
+            for (size_t t = 0; t < sizeof(thick) / sizeof(thick[0]); t++) {
+                CHECK((s = shape_new_line(ends[p % 3], ends[p / 3], ends[q % 3], ends[q / 3], thick[t])) != NULL);
+                check_extreme(s, "line", __LINE__);
+                shape_destroy(s);
+            }
+        }
+    }
+    CHECK((s = shape_new_line(-lim, -lim + 1, lim, lim, 1)) != NULL);
+    check_extreme(s, "line", __LINE__);
+    shape_destroy(s);
+    CHECK((s = shape_new_line(-lim, lim, lim - 3, -lim, 1)) != NULL);
+    check_extreme(s, "line", __LINE__);
+    shape_destroy(s);
 }
 
 static void test_out_of_range_rejected(void)
@@ -580,6 +976,12 @@ static void test_out_of_range_rejected(void)
     CHECK(shape_new_rounded_rect(0, 0, over, 1, 0) == NULL);
     CHECK(shape_new_rounded_rect(0, 0, 1, over, 0) == NULL);
     CHECK(shape_new_rounded_rect(0, 0, 1, 1, over) == NULL);
+
+    CHECK(shape_new_line(over, 0, 0, 0, 1) == NULL);
+    CHECK(shape_new_line(0, under, 0, 0, 1) == NULL);
+    CHECK(shape_new_line(0, 0, INT_MIN, 0, 1) == NULL);
+    CHECK(shape_new_line(0, 0, 0, over, 1) == NULL);
+    CHECK(shape_new_line(0, 0, 0, 0, over) == NULL);
 
     CHECK((s = shape_new_ellipse(SHAPE_VALUE_LIMIT, -SHAPE_VALUE_LIMIT, SHAPE_VALUE_LIMIT, 1)) != NULL);
     shape_destroy(s);
@@ -610,6 +1012,14 @@ int main(void)
     test_rounded_rect_radius_zero_is_rect();
     test_rounded_rect_radius_clamped();
     test_rounded_rect_invalid();
+    test_line_horizontal_thickness();
+    test_line_even_caps();
+    test_line_diagonal_connected();
+    test_line_shallow_one_pixel_per_column();
+    test_line_thick_sloped();
+    test_line_reversed_is_same();
+    test_line_zero_length_is_dot();
+    test_line_invalid();
     test_negative_coordinates();
     test_equal();
     test_large_values();
@@ -617,6 +1027,7 @@ int main(void)
     test_run_outside_bbox();
     test_ellipse_runs_random();
     test_rounded_rect_runs_random();
+    test_line_runs_random();
     test_run_ellipse_values();
     test_out_of_range_rejected();
     test_extreme_values();

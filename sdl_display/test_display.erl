@@ -38,6 +38,7 @@ shapes() ->
     Scene = [
         {text, 10, 4, default16px, 16#FFFFFF, transparent, <<"shapes">>},
         {rounded_rect, 10, 24, 100, 30, 8, 16#3060C0},
+        {line, 120, 24, 220, 54, 3, 16#FFCC00},
         {circle, 40, 90, 20, 16#20C040},
         {ellipse, 110, 90, 35, 15, 16#C04080},
         {scaled_cropped_image, 110, 140, 40, 20, transparent, 0, 0, 20, 20, [], Sprite},

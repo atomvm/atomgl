@@ -368,6 +368,8 @@ static void test_shape_invalid(void)
     expect_invalid("ellipse with circle arity", tuple(5, atom("ellipse"), term_from_int(10), term_from_int(10), term_from_int(5), c));
     expect_invalid("circle radius above limit",
         tuple(5, atom("circle"), term_from_int(10), term_from_int(10), term_from_int(SHAPE_VALUE_LIMIT + 1), c));
+    expect_invalid("line thickness 0",
+        tuple(7, atom("line"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(0), c));
     expect_invalid("rounded_rect color not an integer",
         tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(2), atom("red")));
     expect_invalid("rounded_rect radius above limit",
@@ -381,6 +383,8 @@ static void test_shape_invalid(void)
             tuple(5, atom("circle"), term_from_int(10), term_from_int(10), term_from_int(wrap), c));
         expect_invalid("circle cx 2^32 + 5",
             tuple(5, atom("circle"), term_from_int(wrap), term_from_int(10), term_from_int(3), c));
+        expect_invalid("line thickness 2^32 + 1",
+            tuple(7, atom("line"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(wrap - 4), c));
     }
 }
 
@@ -492,6 +496,8 @@ static void test_shape_valid(void)
     check_shape("rounded_rect",
         tuple(7, atom("rounded_rect"), term_from_int(1), term_from_int(2), term_from_int(30), term_from_int(20), term_from_int(5), c),
         ShapeKindRoundedRect, 1, 2, 30, 20, NULL);
+    check_shape("line", tuple(7, atom("line"), term_from_int(0), term_from_int(5), term_from_int(40), term_from_int(5), term_from_int(1), c),
+        ShapeKindLine, 0, 5, 41, 1, NULL);
     check_shape("circle at the value limit",
         tuple(5, atom("circle"), term_from_int(-SHAPE_VALUE_LIMIT), term_from_int(SHAPE_VALUE_LIMIT), term_from_int(SHAPE_VALUE_LIMIT), c),
         ShapeKindEllipse, -2 * SHAPE_VALUE_LIMIT, 0, 2 * SHAPE_VALUE_LIMIT + 1, 2 * SHAPE_VALUE_LIMIT + 1, NULL);
@@ -887,6 +893,9 @@ static void test_shape_reasons(void)
     expect_reason("ellipse zero radius",
         tuple(6, atom("ellipse"), term_from_int(0), term_from_int(0), term_from_int(3), term_from_int(0), c),
         "invalid display list item (ellipse/6): bad center, radii or color\n");
+    expect_reason("line zero thickness",
+        tuple(7, atom("line"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(0), c),
+        "invalid display list item (line/7): bad points, thickness or color\n");
     heap_release(mark);
 }
 

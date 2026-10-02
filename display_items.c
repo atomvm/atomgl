@@ -286,6 +286,23 @@ static const char *init_ellipse_item(BaseDisplayItem *item, term req)
     return init_shape_item(item, shape_new_ellipse(cx, cy, rx, ry), color);
 }
 
+static const char *init_line_item(BaseDisplayItem *item, term req)
+{
+    int x1, y1, x2, y2, thickness;
+    uint32_t color;
+    if (UNLIKELY(term_get_tuple_arity(req) != 7)) {
+        return "wrong arity";
+    }
+    if (UNLIKELY(!get_shape_value_element(req, 1, &x1) || !get_shape_value_element(req, 2, &y1)
+            || !get_shape_value_element(req, 3, &x2) || !get_shape_value_element(req, 4, &y2)
+            || !get_bounded_element(req, 5, 1, SHAPE_VALUE_LIMIT, &thickness)
+            || !get_color_element(req, 6, &color))) {
+        return "bad points, thickness or color";
+    }
+
+    return init_shape_item(item, shape_new_line(x1, y1, x2, y2, thickness), color);
+}
+
 static int clamp_coord(avm_int64_t v)
 {
     if (v < -DISPLAY_ITEMS_COORD_LIMIT) {
@@ -480,6 +497,9 @@ static const char *init_item(BaseDisplayItem *item, term req, Context *ctx)
 
     } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x7", "ellipse"))) {
         reason = init_ellipse_item(item, req);
+
+    } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x4", "line"))) {
+        reason = init_line_item(item, req);
 
     } else {
         reason = "unknown command";
