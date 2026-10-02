@@ -253,6 +253,22 @@ static const char *init_rounded_rect_item(BaseDisplayItem *item, term req)
     return init_shape_item(item, shape_new_rounded_rect(x, y, width, height, radius), color);
 }
 
+static const char *init_circle_item(BaseDisplayItem *item, term req)
+{
+    int cx, cy, radius;
+    uint32_t color;
+    if (UNLIKELY(term_get_tuple_arity(req) != 5)) {
+        return "wrong arity";
+    }
+    if (UNLIKELY(!get_shape_value_element(req, 1, &cx) || !get_shape_value_element(req, 2, &cy)
+            || !get_bounded_element(req, 3, 1, SHAPE_VALUE_LIMIT, &radius)
+            || !get_color_element(req, 4, &color))) {
+        return "bad center, radius or color";
+    }
+
+    return init_shape_item(item, shape_new_ellipse(cx, cy, radius, radius), color);
+}
+
 static int clamp_coord(avm_int64_t v)
 {
     if (v < -DISPLAY_ITEMS_COORD_LIMIT) {
@@ -441,6 +457,9 @@ static const char *init_item(BaseDisplayItem *item, term req, Context *ctx)
 
     } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\xC", "rounded_rect"))) {
         reason = init_rounded_rect_item(item, req);
+
+    } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x6", "circle"))) {
+        reason = init_circle_item(item, req);
 
     } else {
         reason = "unknown command";

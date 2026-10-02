@@ -54,6 +54,15 @@ struct ShapeRoundedRect
     int radius;
 };
 
+struct ShapeEllipse
+{
+    struct ShapeConvex convex;
+    int cx;
+    int cy;
+    int rx;
+    int ry;
+};
+
 static void *shape_alloc(size_t size, shape_kind_t kind)
 {
     struct ShapeData *shape = malloc(size);
@@ -103,6 +112,27 @@ struct ShapeData *shape_new_rounded_rect(int x, int y, int w, int h, int radius)
     return &rr->convex.base;
 }
 
+struct ShapeData *shape_new_ellipse(int cx, int cy, int rx, int ry)
+{
+    if (!in_limit(cx) || !in_limit(cy) || !in_limit(rx) || !in_limit(ry) || rx <= 0 || ry <= 0) {
+        return NULL;
+    }
+    struct ShapeEllipse *e = shape_alloc(sizeof(*e), ShapeKindEllipse);
+    if (e == NULL) {
+        return NULL;
+    }
+    convex_init(&e->convex);
+    e->cx = cx;
+    e->cy = cy;
+    e->rx = rx;
+    e->ry = ry;
+    e->convex.base.x = cx - rx;
+    e->convex.base.y = cy - ry;
+    e->convex.base.w = 2 * rx + 1;
+    e->convex.base.h = 2 * ry + 1;
+    return &e->convex.base;
+}
+
 static inline bool in_disc(int64_t dx, int64_t dy, int64_t r)
 {
     return dx * dx + dy * dy < r * r + r;
@@ -148,11 +178,28 @@ static bool rounded_rect_contains(const struct ShapeRoundedRect *rr, int x, int 
     return in_disc(x - cx, y - cy, r);
 }
 
+static bool ellipse_contains(const struct ShapeEllipse *e, int x, int y)
+{
+    if (!in_bbox(&e->convex.base, x, y)) {
+        return false;
+    }
+    int64_t dx = (int64_t) x - e->cx;
+    int64_t dy = (int64_t) y - e->cy;
+    int64_t rx = e->rx;
+    int64_t ry = e->ry;
+    // midpoint criterion dx^2 / (rx^2 + rx) + dy^2 / (ry^2 + ry) < 1
+    int64_t kx = rx * rx + rx;
+    int64_t ky = ry * ry + ry;
+    return dx * dx * ky + dy * dy * kx < kx * ky;
+}
+
 bool shape_contains(const struct ShapeData *shape, int x, int y)
 {
     switch (shape->kind) {
         case ShapeKindRoundedRect:
             return rounded_rect_contains((const struct ShapeRoundedRect *) shape, x, y);
+        case ShapeKindEllipse:
+            return ellipse_contains((const struct ShapeEllipse *) shape, x, y);
         default:
             return false;
     }
@@ -163,6 +210,8 @@ static int convex_candidate_x(const struct ShapeData *shape)
     switch (shape->kind) {
         case ShapeKindRoundedRect:
             return shape->x + shape->w / 2;
+        case ShapeKindEllipse:
+            return ((const struct ShapeEllipse *) shape)->cx;
         default:
             return 0;
     }
@@ -248,6 +297,7 @@ int shape_run(struct ShapeData *shape, int x, int y, bool *inside)
 
     switch (shape->kind) {
         case ShapeKindRoundedRect:
+        case ShapeKindEllipse:
             return convex_run((struct ShapeConvex *) shape, x, y, end, inside);
         default:
             *inside = false;
@@ -279,6 +329,12 @@ bool shape_equal(const struct ShapeData *a, const struct ShapeData *b)
             const struct ShapeRoundedRect *rr_b = (const struct ShapeRoundedRect *) b;
             return a->x == b->x && a->y == b->y && a->w == b->w && a->h == b->h
                 && rr_a->radius == rr_b->radius;
+        }
+        case ShapeKindEllipse: {
+            const struct ShapeEllipse *e_a = (const struct ShapeEllipse *) a;
+            const struct ShapeEllipse *e_b = (const struct ShapeEllipse *) b;
+            return e_a->cx == e_b->cx && e_a->cy == e_b->cy && e_a->rx == e_b->rx
+                && e_a->ry == e_b->ry;
         }
         default:
             return false;

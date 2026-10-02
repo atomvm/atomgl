@@ -63,11 +63,13 @@ Text can be provided as either an Erlang string (a list) or an Elixir string (a 
 encoding is supported.
 
 ### Shapes
-Shape primitives (`rounded_rect`) paint only the pixels inside the shape; pixels in the bounding
-box but outside the shape show whatever item is below in the display list.
+Shape primitives (`rounded_rect`, `circle`) paint only the pixels inside the shape; pixels in the
+bounding box but outside the shape show whatever item is below in the display list.
 
+`circle` places its points on pixel centers: the pixel at `{X, Y}` is drawn when it is inside.
 Round edges use the midpoint rule: a pixel at offset `{DX, DY}` from the center is inside a radius
-`R` when `DX * DX + DY * DY < R * R + R`.
+`R` when `DX * DX + DY * DY < R * R + R`, so a shape of radius `R` is `2 * R + 1` pixels across and
+a circle of radius 1 is a 5 pixel plus.
 
 ## image
 
@@ -146,6 +148,18 @@ a 12 pixel high button gets a radius of at most 5.
 {rounded_rect,
   X, Y, Width, Height, % bounding rect in pixels
   Radius, % corner radius in pixels, >= 0, clamped to (min(Width, Height) - 1) div 2
+  Color % RGB fill color
+}
+```
+
+## circle
+
+Draws a filled circle centered on the given point.
+
+```erlang
+{circle,
+  CX, CY, % center in pixels
+  R, % radius in pixels, > 0, the circle is 2 * R + 1 pixels wide
   Color % RGB fill color
 }
 ```

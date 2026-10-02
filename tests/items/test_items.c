@@ -363,6 +363,8 @@ static void test_shape_invalid(void)
     expect_invalid("not a tuple", term_from_int(3));
     expect_invalid("empty tuple", tuple(0));
     expect_invalid("unknown command", tuple(2, atom("triangle"), term_from_int(1)));
+    expect_invalid("circle radius above limit",
+        tuple(5, atom("circle"), term_from_int(10), term_from_int(10), term_from_int(SHAPE_VALUE_LIMIT + 1), c));
     expect_invalid("rounded_rect color not an integer",
         tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(2), atom("red")));
     expect_invalid("rounded_rect radius above limit",
@@ -372,6 +374,10 @@ static void test_shape_invalid(void)
         avm_int_t wrap = ((avm_int_t) 1 << 32) + 5;
         expect_invalid("rounded_rect width 2^32 + 5",
             tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(wrap), term_from_int(9), term_from_int(2), c));
+        expect_invalid("circle radius 2^32 + 5",
+            tuple(5, atom("circle"), term_from_int(10), term_from_int(10), term_from_int(wrap), c));
+        expect_invalid("circle cx 2^32 + 5",
+            tuple(5, atom("circle"), term_from_int(wrap), term_from_int(10), term_from_int(3), c));
     }
 }
 
@@ -476,9 +482,14 @@ static void test_shape_valid(void)
 {
     term c = term_from_int(0x123456);
 
+    check_shape("circle", tuple(5, atom("circle"), term_from_int(10), term_from_int(12), term_from_int(4), c), ShapeKindEllipse, 6, 8,
+        9, 9, NULL);
     check_shape("rounded_rect",
         tuple(7, atom("rounded_rect"), term_from_int(1), term_from_int(2), term_from_int(30), term_from_int(20), term_from_int(5), c),
         ShapeKindRoundedRect, 1, 2, 30, 20, NULL);
+    check_shape("circle at the value limit",
+        tuple(5, atom("circle"), term_from_int(-SHAPE_VALUE_LIMIT), term_from_int(SHAPE_VALUE_LIMIT), term_from_int(SHAPE_VALUE_LIMIT), c),
+        ShapeKindEllipse, -2 * SHAPE_VALUE_LIMIT, 0, 2 * SHAPE_VALUE_LIMIT + 1, 2 * SHAPE_VALUE_LIMIT + 1, NULL);
 }
 
 static void test_integer_forms(void)
@@ -507,6 +518,8 @@ static void test_integer_forms(void)
     delete_item(&item);
     expect_invalid("image x boxed 2^31",
         tuple(5, atom("image"), boxed_int((avm_int64_t) 1 << 31), term_from_int(0), transparent, ok_img));
+    expect_invalid("circle radius boxed 2^40",
+        tuple(5, atom("circle"), term_from_int(0), term_from_int(0), boxed_int((avm_int64_t) 1 << 40), term_from_int(0)));
 }
 
 static term text_binary(const char *text)
@@ -661,6 +674,7 @@ static void test_alloc_failures(void)
     term c = term_from_int(0x123456);
     expect_invalid_on_alloc_failure("rounded_rect",
         tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(2), c), 1);
+    expect_invalid_on_alloc_failure("circle", tuple(5, atom("circle"), term_from_int(10), term_from_int(10), term_from_int(4), c), 1);
 }
 
 static term *heap_mark(void)
@@ -858,6 +872,12 @@ static void test_shape_reasons(void)
     expect_reason_on_alloc_failure("rounded_rect",
         tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(2), c),
         "invalid display list item (rounded_rect/7): out of memory\n");
+    expect_reason("circle arity", tuple(4, atom("circle"), term_from_int(0), term_from_int(0), term_from_int(3)),
+        "invalid display list item (circle/4): wrong arity\n");
+    expect_reason("circle zero radius", tuple(5, atom("circle"), term_from_int(0), term_from_int(0), term_from_int(0), c),
+        "invalid display list item (circle/5): bad center, radius or color\n");
+    expect_reason_on_alloc_failure("circle", tuple(5, atom("circle"), term_from_int(0), term_from_int(0), term_from_int(3), c),
+        "invalid display list item (circle/5): out of memory\n");
 
     heap_release(mark);
 }
