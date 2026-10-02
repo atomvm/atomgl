@@ -28,6 +28,8 @@
 
 #include <context.h>
 
+#include "shape.h"
+
 // TODO: deprecated helper, remove this
 static inline term context_make_atom(Context *ctx, AtomString string)
 {
@@ -42,7 +44,8 @@ typedef enum
     PrimitiveImage,
     PrimitiveScaledCroppedImage,
     PrimitiveRect,
-    PrimitiveText
+    PrimitiveText,
+    PrimitiveShape
 } primitive_t;
 
 struct TextData
@@ -63,6 +66,14 @@ struct ImageDataWithSize
     const char *pix;
 };
 
+struct ShapeItemData
+{
+    struct ShapeData *shape;
+    int16_t outside_row;
+    int16_t outside_from;
+    int16_t outside_to;
+};
+
 struct BaseDisplayItem
 {
     primitive_t primitive;
@@ -76,6 +87,7 @@ struct BaseDisplayItem
         struct ImageData image_data;
         struct ImageDataWithSize image_data_with_size;
         struct TextData text_data;
+        struct ShapeItemData shape_data;
     } data;
 
     //used just for scaled cropped image
@@ -189,6 +201,29 @@ static inline const uint32_t *display_items_scaled_cropped_row_pixel(
     const struct ScaledCroppedRow *src, int col_px)
 {
     return src->origin + (col_px + src->col_offset) / src->col_divisor;
+}
+
+static inline bool display_items_shape_outside_run(const BaseDisplayItem *item, int xpos, int ypos,
+    int *run)
+{
+    const struct ShapeItemData *data = &item->data.shape_data;
+    if (ypos == data->outside_row && xpos >= data->outside_from && xpos < data->outside_to) {
+        *run = data->outside_to - xpos;
+        return true;
+    }
+    return false;
+}
+
+static inline void display_items_shape_remember_outside(BaseDisplayItem *item, int xpos, int ypos,
+    int run)
+{
+    if (ypos < 0 || ypos > INT16_MAX || xpos < 0 || run > INT16_MAX - xpos) {
+        return;
+    }
+    struct ShapeItemData *data = &item->data.shape_data;
+    data->outside_row = (int16_t) ypos;
+    data->outside_from = (int16_t) xpos;
+    data->outside_to = (int16_t) (xpos + run);
 }
 
 void display_items_init_item(BaseDisplayItem *item, term req, Context *ctx);

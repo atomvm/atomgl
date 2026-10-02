@@ -19,6 +19,7 @@
  */
 
 #include <SDL.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -140,6 +141,9 @@ static bool cmp_display_item(BaseDisplayItem *a, BaseDisplayItem *b)
                 (a->x_scale == b->x_scale) && (a->y_scale == b->y_scale) &&
                 (a->source_x == b->source_x) && (a->source_y == b->source_y) &&
                 (a->flip_x == b->flip_x) && (a->flip_y == b->flip_y);
+
+        case PrimitiveShape:
+            return shape_equal(a->data.shape_data.shape, b->data.shape_data.shape);
 
         default: {
             return true;
@@ -344,6 +348,25 @@ static int draw_rect_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *it
     return drawn_pixels;
 }
 
+static int draw_shape_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *item,
+    int *outside_run)
+{
+    if (display_items_shape_outside_run(item, xpos, ypos, outside_run)) {
+        return 0;
+    }
+    bool inside;
+    int run = shape_run(item->data.shape_data.shape, xpos, ypos, &inside);
+    if (!inside) {
+        display_items_shape_remember_outside(item, xpos, ypos, run);
+        *outside_run = run;
+        return 0;
+    }
+    if (run > max_line_len) {
+        run = max_line_len;
+    }
+    return draw_rect_x(xpos, ypos, run, item);
+}
+
 static int draw_text_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *item)
 {
     int x = item->x;
@@ -401,7 +424,7 @@ static int draw_text_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *it
 static int draw_x(int xpos, int ypos, BaseDisplayItem items[], size_t items_len)
 {
     int line_len = screen->w - xpos;
-    bool below = false;
+    int transparent_run = INT_MAX;
 
     for (size_t i = 0; i < items_len; i++) {
         BaseDisplayItem *item = &items[i];
@@ -419,8 +442,9 @@ static int draw_x(int xpos, int ypos, BaseDisplayItem items[], size_t items_len)
             continue;
         }
 
-        int max_line_len = below ? 1 : line_len;
+        int max_line_len = (line_len < transparent_run) ? line_len : transparent_run;
 
+        int run = 1;
         int drawn_pixels = 0;
         switch (items[i].primitive) {
             case PrimitiveImage:
@@ -439,6 +463,10 @@ static int draw_x(int xpos, int ypos, BaseDisplayItem items[], size_t items_len)
                 drawn_pixels = draw_text_x(xpos, ypos, max_line_len, item);
                 break;
 
+            case PrimitiveShape:
+                drawn_pixels = draw_shape_x(xpos, ypos, max_line_len, item, &run);
+                break;
+
             default: {
                 fprintf(stderr, "unexpected display list command.\n");
             }
@@ -448,7 +476,9 @@ static int draw_x(int xpos, int ypos, BaseDisplayItem items[], size_t items_len)
             return drawn_pixels;
         }
 
-        below = true;
+        if (run < transparent_run) {
+            transparent_run = run;
+        }
     }
 
     return 1;

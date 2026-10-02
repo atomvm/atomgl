@@ -355,11 +355,23 @@ static void test_image_invalid(void)
     }
 }
 
-static void test_command_invalid(void)
+static void test_shape_invalid(void)
 {
+    term c = term_from_int(0xFF0000);
+
     expect_invalid("not a tuple", term_from_int(3));
     expect_invalid("empty tuple", tuple(0));
     expect_invalid("unknown command", tuple(2, atom("triangle"), term_from_int(1)));
+    expect_invalid("rounded_rect color not an integer",
+        tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(2), atom("red")));
+    expect_invalid("rounded_rect radius above limit",
+        tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(SHAPE_VALUE_LIMIT + 1), c));
+
+    if (big_ints()) {
+        avm_int_t wrap = ((avm_int_t) 1 << 32) + 5;
+        expect_invalid("rounded_rect width 2^32 + 5",
+            tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(wrap), term_from_int(9), term_from_int(2), c));
+    }
 }
 
 static void test_image_valid(void)
@@ -435,6 +447,39 @@ static void test_scaled_cropped_image_valid(void)
     delete_item(&item);
 }
 
+static void check_shape(const char *name, term req, shape_kind_t kind, int x, int y, int w, int h,
+    BaseDisplayItem *out)
+{
+    BaseDisplayItem item;
+    parse(req, &item);
+    CHECK(item.primitive == PrimitiveShape && item.data.shape_data.shape != NULL, "%s: primitive %d", name, item.primitive);
+    if (out) {
+        memset(out, 0, sizeof(*out));
+    }
+    if (item.primitive != PrimitiveShape) {
+        return;
+    }
+    CHECK(shape_kind(item.data.shape_data.shape) == kind, "%s: kind %d", name, shape_kind(item.data.shape_data.shape));
+    CHECK(item.brcolor == 0x123456FF, "%s: brcolor %#x", name, (unsigned) item.brcolor);
+    CHECK(item.x == x && item.y == y && item.width == w && item.height == h,
+        "%s: bbox (%d, %d, %d, %d), expected (%d, %d, %d, %d)", name, item.x, item.y, item.width,
+        item.height, x, y, w, h);
+    if (out) {
+        *out = item;
+    } else {
+        delete_item(&item);
+    }
+}
+
+static void test_shape_valid(void)
+{
+    term c = term_from_int(0x123456);
+
+    check_shape("rounded_rect",
+        tuple(7, atom("rounded_rect"), term_from_int(1), term_from_int(2), term_from_int(30), term_from_int(20), term_from_int(5), c),
+        ShapeKindRoundedRect, 1, 2, 30, 20, NULL);
+}
+
 static void test_integer_forms(void)
 {
     BaseDisplayItem item;
@@ -461,6 +506,7 @@ static void test_integer_forms(void)
     delete_item(&item);
     expect_invalid("image x boxed 2^31",
         tuple(5, atom("image"), boxed_int((avm_int64_t) 1 << 31), term_from_int(0), transparent, ok_img));
+
 }
 
 static term text_binary(const char *text)
@@ -608,6 +654,13 @@ static void test_text(void)
     expect_invalid("text not a string", text(term_from_int(0), font, fg, transparent, term_from_int(3)));
     expect_invalid("text improper list", text(term_from_int(0), font, fg, transparent, cons(term_from_int('a'), term_from_int(3))));
     expect_invalid_on_alloc_failure("text", text(term_from_int(0), font, fg, transparent, string("abc")), 1);
+}
+
+static void test_alloc_failures(void)
+{
+    term c = term_from_int(0x123456);
+    expect_invalid_on_alloc_failure("rounded_rect",
+        tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(2), c), 1);
 }
 
 static term *heap_mark(void)
@@ -989,12 +1042,14 @@ int main(void)
 
     test_scaled_cropped_image_invalid();
     test_image_invalid();
-    test_command_invalid();
+    test_shape_invalid();
     test_image_valid();
     test_scaled_cropped_image_valid();
+    test_shape_valid();
     test_integer_forms();
     test_rect();
     test_text();
+    test_alloc_failures();
     test_log_format();
     test_new_list();
     test_huge_rect_pixels();

@@ -49,6 +49,7 @@ idf_component_register(SRCS
     "ufontlib.c"
     "backlight_gpio.c"
     "image_helpers.c"
+    "shape.c"
     "spng.c"
     "miniz.c"
     PRIV_REQUIRES "libatomvm" "avm_sys" "avm_builtins" "driver" "sdmmc" "vfs" "fatfs"

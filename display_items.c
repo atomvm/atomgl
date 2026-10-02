@@ -97,6 +97,11 @@ static bool get_coord_element(term req, int index, int *out)
     return get_bounded_element(req, index, -DISPLAY_ITEMS_COORD_LIMIT, DISPLAY_ITEMS_COORD_LIMIT, out);
 }
 
+static bool get_shape_value_element(term req, int index, int *out)
+{
+    return get_bounded_element(req, index, -SHAPE_VALUE_LIMIT, SHAPE_VALUE_LIMIT, out);
+}
+
 static bool get_color_element(term req, int index, uint32_t *out)
 {
     avm_int64_t color;
@@ -213,6 +218,52 @@ static const char *init_scaled_cropped_image_item(BaseDisplayItem *item, term re
 
     item->primitive = PrimitiveScaledCroppedImage;
     item->data.image_data_with_size = img;
+
+    return NULL;
+}
+
+typedef enum
+{
+    ShapeCmdNone,
+    ShapeCmdRoundedRect
+} shape_cmd_t;
+
+static shape_cmd_t get_shape_cmd(term cmd, Context *ctx)
+{
+    if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\xC", "rounded_rect"))) {
+        return ShapeCmdRoundedRect;
+    }
+    return ShapeCmdNone;
+}
+
+static const char *init_shape_item(BaseDisplayItem *item, term req, Context *ctx, shape_cmd_t cmd)
+{
+    int arity = term_get_tuple_arity(req);
+    struct ShapeData *shape = NULL;
+    bool ok = false;
+    int a, b, c, d, e;
+    uint32_t color = 0;
+
+    switch (cmd) {
+        case ShapeCmdRoundedRect:
+            ok = arity == 7 && get_shape_value_element(req, 1, &a) && get_shape_value_element(req, 2, &b)
+                && get_shape_value_element(req, 3, &c) && get_shape_value_element(req, 4, &d)
+                && get_shape_value_element(req, 5, &e) && get_color_element(req, 6, &color)
+                && (shape = shape_new_rounded_rect(a, b, c, d, e)) != NULL;
+            break;
+
+        default:
+            break;
+    }
+
+    if (!ok) {
+        return "wrong arity, bad argument or out of memory";
+    }
+
+    item->primitive = PrimitiveShape;
+    item->brcolor = color;
+    item->data.shape_data.shape = shape;
+    shape_bounds(shape, &item->x, &item->y, &item->width, &item->height);
 
     return NULL;
 }
@@ -389,6 +440,7 @@ static const char *init_item(BaseDisplayItem *item, term req, Context *ctx)
     }
 
     term cmd = term_get_tuple_element(req, 0);
+    shape_cmd_t shape_cmd;
     const char *reason;
 
     if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x5", "image"))) {
@@ -402,6 +454,9 @@ static const char *init_item(BaseDisplayItem *item, term req, Context *ctx)
 
     } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x4", "text"))) {
         reason = init_text_item(item, req, ctx);
+
+    } else if ((shape_cmd = get_shape_cmd(cmd, ctx)) != ShapeCmdNone) {
+        reason = init_shape_item(item, req, ctx, shape_cmd);
 
     } else {
         reason = "unknown command";
@@ -501,6 +556,10 @@ void display_items_delete(BaseDisplayItem items[], size_t items_len)
 
             case PrimitiveText:
                 free((char *) item->data.text_data.text);
+                break;
+
+            case PrimitiveShape:
+                shape_destroy(item->data.shape_data.shape);
                 break;
 
             default: {

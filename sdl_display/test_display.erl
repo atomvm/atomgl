@@ -19,7 +19,7 @@
 %
 
 -module(test_display).
--export([start/0, loop/0]).
+-export([start/0, shapes/0, loop/0]).
 
 start() ->
     Display = erlang:open_port({spawn, "display"}, []),
@@ -28,10 +28,21 @@ start() ->
     disp(Display, 16#00FF0000),
     disp(Display, 16#0000FF00),
 
-    % TODO: let's switch back to the following as soon as tuple format is changed in port.c
-    % Display ! {'$call', {self(), make_ref()}, {subscribe_input}},
-    Display ! {self(), make_ref(), {subscribe_input, all}},
+    Display ! {'$call', {self(), make_ref()}, {subscribe_input, all}},
 
+    loop().
+
+shapes() ->
+    Display = erlang:open_port({spawn, "display"}, []),
+    Sprite = {rgba8888, 2, 1, <<255, 0, 0, 255, 0, 0, 255, 255>>},
+    Scene = [
+        {text, 10, 4, default16px, 16#FFFFFF, transparent, <<"shapes">>},
+        {rounded_rect, 10, 24, 100, 30, 8, 16#3060C0},
+        {scaled_cropped_image, 110, 140, 40, 20, transparent, 0, 0, 20, 20, [], Sprite},
+        {scaled_cropped_image, 160, 140, 40, 20, transparent, 0, 0, 20, 20, [{flip_x, true}], Sprite},
+        {rect, 0, 0, 240, 240, 16#202020}
+    ],
+    Display ! {'$call', {self(), make_ref()}, {update, Scene}},
     loop().
 
 disp(Display, Num) ->
@@ -39,9 +50,7 @@ disp(Display, Num) ->
     Scene = [
         {text, 10, 20, default16px, Num, 16#FFFFFF, <<"Test ", Bin/binary>>}
     ],
-    % TODO: let's switch back to the following as soon as tuple format is changed in port.c
-    % Display ! {'$call', {self(), make_ref()}, {update, Scene}}.
-    Display ! {self(), make_ref(), {update, Scene}}.
+    Display ! {'$call', {self(), make_ref()}, {update, Scene}}.
 
 loop() ->
     receive

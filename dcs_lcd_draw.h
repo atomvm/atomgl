@@ -30,6 +30,9 @@ int dcs_lcd_draw_image_x(const struct DCSLCDScreen *screen,
 int dcs_lcd_draw_rect_x(const struct DCSLCDScreen *screen,
     int xpos, int ypos, int max_line_len, BaseDisplayItem *item);
 
+int dcs_lcd_draw_shape_x(const struct DCSLCDScreen *screen,
+    int xpos, int ypos, int max_line_len, BaseDisplayItem *item, int *outside_run);
+
 int dcs_lcd_draw_text_x(const struct DCSLCDScreen *screen,
     int xpos, int ypos, int max_line_len, BaseDisplayItem *item);
 

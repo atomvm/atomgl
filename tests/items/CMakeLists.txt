@@ -33,8 +33,8 @@ endif()
 option(ITEMS_SANITIZE "Build with ASan and UBSan, aborting on the first report" ON)
 
 add_executable(test_items test_items.c atomvm_stubs.c alloc_counter.c
-    ../../display_items.c ../../dcs_lcd_draw.c ../../font_data.c)
-set_source_files_properties(../../display_items.c PROPERTIES
+    ../../display_items.c ../../shape.c ../../dcs_lcd_draw.c ../../font_data.c)
+set_source_files_properties(../../display_items.c ../../shape.c PROPERTIES
     COMPILE_OPTIONS "-include;${CMAKE_CURRENT_SOURCE_DIR}/alloc_counter.h")
 target_include_directories(test_items PRIVATE ../.. ../stubs ${LIBATOMVM_INCLUDE_PATH})
 target_compile_definitions(test_items PRIVATE HAVE_ATOMIC)
