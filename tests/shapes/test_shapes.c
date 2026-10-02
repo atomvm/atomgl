@@ -515,12 +515,268 @@ static void test_equal(void)
     shape_destroy(b);
 }
 
+static void test_arc_quarter(void)
+{
+    struct ShapeData *s;
+    CHECK((s = shape_new_arc(0, 0, 10, 3, 0, 90)) != NULL);
+    CHECK_BOUNDS(s, -10, -10, 21, 21);
+    CHECK(shape_contains(s, 7, 7));
+    CHECK(!shape_contains(s, 7, -7));
+    CHECK(!shape_contains(s, -7, 7));
+    CHECK(!shape_contains(s, 0, 0));
+    CHECK(!shape_contains(s, 3, 3));
+    CHECK(shape_contains(s, 10, 0));
+    CHECK(shape_contains(s, 0, 10));
+    shape_destroy(s);
+}
+
+static void test_arc_full_ring(void)
+{
+    struct ShapeData *s;
+    CHECK((s = shape_new_arc(0, 0, 10, 2, 0, 360)) != NULL);
+    CHECK(shape_contains(s, 9, 0));
+    CHECK(shape_contains(s, -9, 0));
+    CHECK(shape_contains(s, 0, 9));
+    CHECK(shape_contains(s, 0, -9));
+    CHECK(!shape_contains(s, 0, 0));
+    shape_destroy(s);
+}
+
+static void test_arc_over_180(void)
+{
+    struct ShapeData *s;
+    CHECK((s = shape_new_arc(0, 0, 10, 3, 0, 270)) != NULL);
+    CHECK(shape_contains(s, 7, 7));
+    CHECK(shape_contains(s, -7, 7));
+    CHECK(shape_contains(s, -7, -7));
+    CHECK(!shape_contains(s, 7, -7));
+    shape_destroy(s);
+}
+
+static void test_arc_wraparound(void)
+{
+    struct ShapeData *s;
+    CHECK((s = shape_new_arc(0, 0, 10, 3, 300, 60)) != NULL);
+    CHECK(shape_contains(s, 9, 0));
+    CHECK(shape_contains(s, 5, -8));
+    CHECK(shape_contains(s, 5, 8));
+    CHECK(!shape_contains(s, 0, 9));
+    CHECK(!shape_contains(s, -9, 0));
+    shape_destroy(s);
+}
+
+static void test_arc_negative_angles(void)
+{
+    struct ShapeData *a;
+    struct ShapeData *b;
+    CHECK((a = shape_new_arc(0, 0, 10, 3, -90, 0)) != NULL);
+    CHECK((b = shape_new_arc(0, 0, 10, 3, 270, 360)) != NULL);
+    for (int y = -10; y <= 10; y++) {
+        for (int x = -10; x <= 10; x++) {
+            CHECK(shape_contains(a, x, y) == shape_contains(b, x, y));
+        }
+    }
+    CHECK(shape_contains(a, 7, -7));
+    CHECK(!shape_contains(a, 7, 7));
+    shape_destroy(a);
+    shape_destroy(b);
+}
+
+static void check_arc_same(int start_deg, int end_deg, int ref_start, int ref_end, int line)
+{
+    struct ShapeData *a = shape_new_arc(0, 0, 12, 4, start_deg, end_deg);
+    struct ShapeData *b = shape_new_arc(0, 0, 12, 4, ref_start, ref_end);
+    if (a == NULL || b == NULL) {
+        fprintf(stderr, "%s:%d: arc init failed\n", __FILE__, line);
+        failures++;
+        shape_destroy(a);
+        shape_destroy(b);
+        return;
+    }
+    if (!same_pixels(a, b)) {
+        fprintf(stderr, "%s:%d: arc (%d, %d) differs from (%d, %d)\n", __FILE__, line,
+            start_deg, end_deg, ref_start, ref_end);
+        failures++;
+    }
+    shape_destroy(a);
+    shape_destroy(b);
+}
+
+#define CHECK_ARC_SAME(s, e, rs, re) check_arc_same(s, e, rs, re, __LINE__)
+
+static int arc_sweep(int start_deg, int end_deg)
+{
+    struct ShapeData *s = shape_new_arc(0, 0, 10, 2, start_deg, end_deg);
+    if (s == NULL) {
+        return -1;
+    }
+    int start = ((start_deg % 360) + 360) % 360;
+    int sweep = 0;
+    for (int k = 1; k <= 360 && sweep == 0; k++) {
+        struct ShapeData *ref = shape_new_arc(0, 0, 10, 2, start, start + k);
+        if (shape_equal(s, ref)) {
+            sweep = k;
+        }
+        shape_destroy(ref);
+    }
+    shape_destroy(s);
+    return sweep;
+}
+
+static void test_arc_sweep_rule(void)
+{
+    CHECK(arc_sweep(0, 90) == 90);
+    CHECK(arc_sweep(0, -90) == 270);
+    CHECK(arc_sweep(0, -359) == 1);
+    CHECK(arc_sweep(0, 360) == 360);
+    CHECK(arc_sweep(0, -360) == 360);
+    CHECK(arc_sweep(0, 720) == 360);
+    CHECK(arc_sweep(0, 400) == 40);
+    CHECK(arc_sweep(90, 0) == 270);
+    CHECK(arc_sweep(-90, 0) == 90);
+    CHECK(arc_sweep(0, 0) == -1);
+    CHECK(arc_sweep(45, 45) == -1);
+    CHECK(arc_sweep(-360, -360) == -1);
+    CHECK(arc_sweep(INT_MIN, INT_MAX) == 255);
+    CHECK(arc_sweep(INT_MAX, INT_MIN) == 105);
+
+    CHECK_ARC_SAME(0, -90, 0, 270);
+    CHECK_ARC_SAME(0, -359, 0, 1);
+    CHECK_ARC_SAME(0, 400, 0, 40);
+    CHECK_ARC_SAME(0, -360, 0, 360);
+    CHECK_ARC_SAME(0, 720, 0, 360);
+    CHECK_ARC_SAME(90, 0, 90, 360);
+    CHECK_ARC_SAME(-90, 0, 270, 360);
+
+    struct ShapeData *s;
+    CHECK((s = shape_new_arc(0, 0, 12, 4, 0, -360)) != NULL);
+    CHECK(shape_contains(s, 10, 0));
+    CHECK(shape_contains(s, 0, 10));
+    CHECK(shape_contains(s, -10, 0));
+    CHECK(shape_contains(s, 0, -10));
+    CHECK(shape_contains(s, 7, -7));
+    shape_destroy(s);
+
+    CHECK((s = shape_new_arc(0, 0, 40, 4, 0, -359)) != NULL);
+    CHECK(shape_contains(s, 38, 0));
+    CHECK(!shape_contains(s, 0, 38));
+    CHECK(!shape_contains(s, -38, 0));
+    CHECK(!shape_contains(s, 27, -27));
+    shape_destroy(s);
+}
+
+static void test_arc_pie(void)
+{
+    struct ShapeData *s;
+    CHECK((s = shape_new_arc(0, 0, 10, 10, 0, 90)) != NULL);
+    CHECK(shape_contains(s, 0, 0));
+    CHECK(shape_contains(s, 2, 2));
+    CHECK(!shape_contains(s, -2, -2));
+    shape_destroy(s);
+}
+
+static void test_arc_matches_circle_when_full_pie(void)
+{
+    struct ShapeData *arc;
+    struct ShapeData *circle;
+    CHECK((arc = shape_new_arc(3, 4, 6, 100, 0, 360)) != NULL);
+    CHECK((circle = shape_new_ellipse(3, 4, 6, 6)) != NULL);
+    for (int y = -3; y <= 11; y++) {
+        for (int x = -4; x <= 10; x++) {
+            CHECK(shape_contains(arc, x, y) == shape_contains(circle, x, y));
+        }
+    }
+    shape_destroy(arc);
+    shape_destroy(circle);
+}
+
+static void test_arc_ring_matches_circles(void)
+{
+    for (int r = 1; r <= 15; r++) {
+        for (int t = 1; t <= r + 1; t++) {
+            struct ShapeData *arc;
+            struct ShapeData *outer;
+            struct ShapeData *hole;
+            CHECK((arc = shape_new_arc(2, 3, r, t, 0, 360)) != NULL);
+            CHECK((outer = shape_new_ellipse(2, 3, r, r)) != NULL);
+            hole = r - t > 0 ? shape_new_ellipse(2, 3, r - t, r - t) : NULL;
+            bool have_hole = hole != NULL;
+            for (int y = 3 - r - 1; y <= 3 + r + 1; y++) {
+                for (int x = 2 - r - 1; x <= 2 + r + 1; x++) {
+                    bool expected = shape_contains(outer, x, y)
+                        && !(have_hole && shape_contains(hole, x, y));
+                    if (shape_contains(arc, x, y) != expected) {
+                        fprintf(stderr, "%s:%d: ring r=%d t=%d differs at (%d,%d)\n", __FILE__,
+                            __LINE__, r, t, x, y);
+                        failures++;
+                    }
+                }
+            }
+            shape_destroy(arc);
+            shape_destroy(outer);
+            shape_destroy(hole);
+        }
+    }
+}
+
+static void check_runs(struct ShapeData *shape, int line);
+
+static bool is_empty(struct ShapeData *s)
+{
+    int bx, by, bw, bh;
+    shape_bounds(s, &bx, &by, &bw, &bh);
+    for (int y = by; y < by + bh; y++) {
+        for (int x = bx; x < bx + bw; x++) {
+            if (shape_contains(s, x, y)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static void test_arc_tiny_sweep_visible(void)
+{
+    static const int radii[] = { 5, 10, 20, 60 };
+    static const int thicknesses[] = { 1, 3 };
+    for (size_t i = 0; i < sizeof(radii) / sizeof(radii[0]); i++) {
+        for (size_t j = 0; j < sizeof(thicknesses) / sizeof(thicknesses[0]); j++) {
+            int empty = 0;
+            for (int start = 0; start < 360; start++) {
+                struct ShapeData *s = shape_new_arc(3, -2, radii[i], thicknesses[j], start, start + 1);
+                CHECK(s != NULL);
+                empty += is_empty(s) ? 1 : 0;
+                if (radii[i] < 60 || start % 7 == 0) {
+                    check_runs(s, __LINE__);
+                }
+                shape_destroy(s);
+            }
+            if (empty) {
+                fprintf(stderr, "%s:%d: r=%d t=%d: %d of 360 one-degree arcs are empty\n", __FILE__,
+                    __LINE__, radii[i], thicknesses[j], empty);
+                failures++;
+            }
+        }
+    }
+}
+
+static void test_arc_invalid(void)
+{
+    CHECK(shape_new_arc(0, 0, 0, 1, 0, 90) == NULL);
+    CHECK(shape_new_arc(0, 0, 10, 0, 0, 90) == NULL);
+    CHECK(shape_new_arc(0, 0, 10, 2, 45, 45) == NULL);
+}
+
 static void test_large_values(void)
 {
     struct ShapeData *s;
     CHECK((s = shape_new_ellipse(0, 0, 10000, 10000)) != NULL);
     CHECK(shape_contains(s, 10000, 0));
     CHECK(!shape_contains(s, 10000, 10000));
+    shape_destroy(s);
+    CHECK((s = shape_new_arc(0, 0, 10000, 5, 0, 90)) != NULL);
+    CHECK(shape_contains(s, 7071, 7071));
+    CHECK(!shape_contains(s, 7071, -7071));
     shape_destroy(s);
     CHECK((s = shape_new_line(-2000, -2000, 2000, 2000, 3)) != NULL);
     CHECK(shape_contains(s, 1234, 1234));
@@ -607,6 +863,12 @@ static void test_run_outside_bbox(void)
     CHECK((s = shape_new_line(0, 0, 50, 13, 5)) != NULL);
     check_run_outside_bbox(s, __LINE__);
     shape_destroy(s);
+    CHECK((s = shape_new_arc(100, 100, 30, 8, 10, 250)) != NULL);
+    check_run_outside_bbox(s, __LINE__);
+    shape_destroy(s);
+    CHECK((s = shape_new_arc(-SHAPE_VALUE_LIMIT, SHAPE_VALUE_LIMIT, SHAPE_VALUE_LIMIT, 1, 0, 360)) != NULL);
+    check_run_outside_bbox(s, __LINE__);
+    shape_destroy(s);
 }
 
 static void test_runs_match_contains(void)
@@ -637,6 +899,16 @@ static void test_runs_match_contains(void)
         CHECK_RUNS(s);
         shape_destroy(s);
     }
+
+    int arcs[][6] = { { 0, 0, 10, 3, 0, 90 }, { 0, 0, 10, 3, 300, 60 }, { 0, 0, 10, 10, 0, 270 },
+        { 0, 0, 6, 2, 0, 360 }, { 5, 5, 12, 4, -90, 180 }, { 0, 0, 1, 1, 0, 90 },
+        { 0, 0, 20, 1, 45, 46 }, { 0, 0, 20, 5, 89, 91 }, { 0, 0, 20, 5, 179, 181 },
+        { 0, 0, 20, 25, 10, 350 }, { 0, 0, 20, 5, 0, 180 }, { 0, 0, 20, 5, 90, 270 } };
+    for (size_t i = 0; i < sizeof(arcs) / sizeof(arcs[0]); i++) {
+        CHECK((s = shape_new_arc(arcs[i][0], arcs[i][1], arcs[i][2], arcs[i][3], arcs[i][4], arcs[i][5])) != NULL);
+        CHECK_RUNS(s);
+        shape_destroy(s);
+    }
 }
 
 static uint32_t rng_state = 12345;
@@ -645,6 +917,24 @@ static int rng_range(int lo, int hi)
 {
     rng_state = rng_state * 1103515245u + 12345u;
     return lo + (int) ((rng_state >> 8) % (uint32_t) (hi - lo + 1));
+}
+
+static void test_arc_runs_random(void)
+{
+    for (int i = 0; i < 400; i++) {
+        int r = rng_range(1, 40);
+        int t = rng_range(1, r + 3);
+        int start = rng_range(-400, 400);
+        int end = start + rng_range(-420, 420);
+        int cx = rng_range(-20, 20);
+        int cy = rng_range(-20, 20);
+        struct ShapeData *s = shape_new_arc(cx, cy, r, t, start, end);
+        if (s == NULL) {
+            continue;
+        }
+        CHECK_RUNS(s);
+        shape_destroy(s);
+    }
 }
 
 static bool is_symmetric(struct ShapeData *s)
@@ -936,6 +1226,13 @@ static void test_extreme_values(void)
                     CHECK((s = shape_new_rounded_rect(cx, cy, sizes[a], sizes[b], lim)) != NULL);
                     check_extreme(s, "rounded_rect", __LINE__);
                     shape_destroy(s);
+
+                    static const int angles[][2] = { { 0, 90 }, { 45, -45 }, { 0, 360 },
+                        { 179, 181 }, { INT_MIN, INT_MAX } };
+                    int k = (a + b) % 5;
+                    CHECK((s = shape_new_arc(cx, cy, sizes[a], sizes[b], angles[k][0], angles[k][1])) != NULL);
+                    check_extreme(s, "arc", __LINE__);
+                    shape_destroy(s);
                 }
             }
         }
@@ -984,6 +1281,11 @@ static void test_out_of_range_rejected(void)
     CHECK(shape_new_line(0, 0, 0, over, 1) == NULL);
     CHECK(shape_new_line(0, 0, 0, 0, over) == NULL);
 
+    CHECK(shape_new_arc(over, 0, 1, 1, 0, 90) == NULL);
+    CHECK(shape_new_arc(0, under, 1, 1, 0, 90) == NULL);
+    CHECK(shape_new_arc(0, 0, over, 1, 0, 90) == NULL);
+    CHECK(shape_new_arc(0, 0, 1, over, 0, 90) == NULL);
+
     CHECK((s = shape_new_ellipse(SHAPE_VALUE_LIMIT, -SHAPE_VALUE_LIMIT, SHAPE_VALUE_LIMIT, 1)) != NULL);
     shape_destroy(s);
 }
@@ -1023,9 +1325,21 @@ int main(void)
     test_line_invalid();
     test_negative_coordinates();
     test_equal();
+    test_arc_quarter();
+    test_arc_full_ring();
+    test_arc_over_180();
+    test_arc_wraparound();
+    test_arc_negative_angles();
+    test_arc_sweep_rule();
+    test_arc_pie();
+    test_arc_matches_circle_when_full_pie();
+    test_arc_ring_matches_circles();
+    test_arc_tiny_sweep_visible();
+    test_arc_invalid();
     test_large_values();
     test_runs_match_contains();
     test_run_outside_bbox();
+    test_arc_runs_random();
     test_ellipse_runs_random();
     test_rounded_rect_runs_random();
     test_line_runs_random();

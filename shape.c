@@ -82,6 +82,26 @@ struct ShapeLine
     int64_t t_da;
 };
 
+#define ARC_MAX_SEGMENTS 12
+
+struct ShapeArc
+{
+    struct ShapeData base;
+    int cx;
+    int cy;
+    int radius;
+    int thickness;
+    int sweep;
+    int32_t start_vx;
+    int32_t start_vy;
+    int32_t end_vx;
+    int32_t end_vy;
+    int seg_row;
+    int seg_count;
+    int seg_start[ARC_MAX_SEGMENTS + 1];
+    bool seg_inside[ARC_MAX_SEGMENTS];
+};
+
 static void *shape_alloc(size_t size, shape_kind_t kind)
 {
     struct ShapeData *shape = malloc(size);
@@ -102,6 +122,45 @@ static inline int int_max(int a, int b)
     return (a > b) ? a : b;
 }
 
+// sin(d) for d = 0..90 degrees, Q14 (16384 = 1.0)
+static const int16_t sin_q14[91] = {
+    0, 286, 572, 857, 1143, 1428, 1713, 1997, 2280, 2563,
+    2845, 3126, 3406, 3686, 3964, 4240, 4516, 4790, 5063, 5334,
+    5604, 5872, 6138, 6402, 6664, 6924, 7182, 7438, 7692, 7943,
+    8192, 8438, 8682, 8923, 9162, 9397, 9630, 9860, 10087, 10311,
+    10531, 10749, 10963, 11174, 11381, 11585, 11786, 11982, 12176, 12365,
+    12551, 12733, 12911, 13085, 13255, 13421, 13583, 13741, 13894, 14044,
+    14189, 14330, 14466, 14598, 14726, 14849, 14968, 15082, 15191, 15296,
+    15396, 15491, 15582, 15668, 15749, 15826, 15897, 15964, 16026, 16083,
+    16135, 16182, 16225, 16262, 16294, 16322, 16344, 16362, 16374, 16382,
+    16384
+};
+
+static int normalize_deg(int deg)
+{
+    deg %= 360;
+    return (deg < 0) ? deg + 360 : deg;
+}
+
+static int32_t sin_deg(int deg)
+{
+    deg = normalize_deg(deg);
+    if (deg <= 90) {
+        return sin_q14[deg];
+    } else if (deg <= 180) {
+        return sin_q14[180 - deg];
+    } else if (deg <= 270) {
+        return -sin_q14[deg - 180];
+    } else {
+        return -sin_q14[360 - deg];
+    }
+}
+
+static int32_t cos_deg(int deg)
+{
+    return sin_deg(normalize_deg(deg) + 90);
+}
+
 static inline bool in_limit(int v)
 {
     return v >= -SHAPE_VALUE_LIMIT && v <= SHAPE_VALUE_LIMIT;
@@ -114,6 +173,11 @@ static int32_t floor_div32(int32_t n, int32_t d)
         q--;
     }
     return q;
+}
+
+static int32_t ceil_div32(int32_t n, int32_t d)
+{
+    return -floor_div32(-n, d);
 }
 
 static int64_t floor_div(int64_t n, int64_t d)
@@ -249,6 +313,39 @@ struct ShapeData *shape_new_ellipse(int cx, int cy, int rx, int ry)
     return &e->convex.base;
 }
 
+struct ShapeData *shape_new_arc(int cx, int cy, int radius, int thickness, int start_deg,
+    int end_deg)
+{
+    if (!in_limit(cx) || !in_limit(cy) || !in_limit(radius) || !in_limit(thickness) || radius <= 0
+        || thickness <= 0 || start_deg == end_deg) {
+        return NULL;
+    }
+    int sweep = normalize_deg(normalize_deg(end_deg) - normalize_deg(start_deg));
+    if (sweep == 0) {
+        sweep = 360;
+    }
+
+    struct ShapeArc *arc = shape_alloc(sizeof(*arc), ShapeKindArc);
+    if (arc == NULL) {
+        return NULL;
+    }
+    arc->base.x = cx - radius;
+    arc->base.y = cy - radius;
+    arc->base.w = 2 * radius + 1;
+    arc->base.h = 2 * radius + 1;
+    arc->cx = cx;
+    arc->cy = cy;
+    arc->radius = radius;
+    arc->thickness = thickness;
+    arc->sweep = sweep;
+    arc->start_vx = cos_deg(start_deg);
+    arc->start_vy = sin_deg(start_deg);
+    arc->end_vx = cos_deg(end_deg);
+    arc->end_vy = sin_deg(end_deg);
+    arc->seg_row = INT_MIN;
+    return &arc->base;
+}
+
 static inline bool in_disc(int64_t dx, int64_t dy, int64_t r)
 {
     return dx * dx + dy * dy < r * r + r;
@@ -341,6 +438,75 @@ static bool line_contains(const struct ShapeLine *l, int x, int y)
     return -l->t_da <= e && e < l->t_da;
 }
 
+static inline int64_t cross(int64_t ux, int64_t uy, int64_t vx, int64_t vy)
+{
+    return ux * vy - uy * vx;
+}
+
+static bool arc_in_outer(const struct ShapeArc *arc, int x, int y)
+{
+    return in_disc((int64_t) x - arc->cx, (int64_t) y - arc->cy, arc->radius);
+}
+
+static bool arc_in_hole(const struct ShapeArc *arc, int x, int y)
+{
+    int inner_radius = arc->radius - arc->thickness;
+    if (inner_radius <= 0) {
+        return false;
+    }
+    return in_disc((int64_t) x - arc->cx, (int64_t) y - arc->cy, inner_radius);
+}
+
+static bool arc_cross_a(const struct ShapeArc *arc, int x, int y)
+{
+    int64_t dx = (int64_t) x - arc->cx;
+    int64_t dy = (int64_t) y - arc->cy;
+    if (arc->sweep <= 180) {
+        return cross(arc->start_vx, arc->start_vy, dx, dy) >= 0;
+    }
+    return cross(arc->end_vx, arc->end_vy, dx, dy) > 0;
+}
+
+static bool arc_cross_b(const struct ShapeArc *arc, int x, int y)
+{
+    int64_t dx = (int64_t) x - arc->cx;
+    int64_t dy = (int64_t) y - arc->cy;
+    if (arc->sweep <= 180) {
+        return cross(dx, dy, arc->end_vx, arc->end_vy) >= 0;
+    }
+    return cross(dx, dy, arc->start_vx, arc->start_vy) > 0;
+}
+
+static bool arc_on_ray(int32_t vx, int32_t vy, int64_t dx, int64_t dy)
+{
+    int64_t c = cross(vx, vy, dx, dy);
+    int64_t s = (int64_t) (vx < 0 ? -vx : vx) + (vy < 0 ? -vy : vy);
+    return 2 * (c < 0 ? -c : c) <= s && vx * dx + vy * dy >= 0;
+}
+
+static bool arc_contains(const struct ShapeArc *arc, int x, int y)
+{
+    if (!in_bbox(&arc->base, x, y)) {
+        return false;
+    }
+    if (!arc_in_outer(arc, x, y) || arc_in_hole(arc, x, y)) {
+        return false;
+    }
+    if (arc->sweep == 360) {
+        return true;
+    }
+    bool in_sweep;
+    if (arc->sweep <= 180) {
+        in_sweep = arc_cross_a(arc, x, y) && arc_cross_b(arc, x, y);
+    } else {
+        in_sweep = !(arc_cross_a(arc, x, y) && arc_cross_b(arc, x, y));
+    }
+    int64_t dx = (int64_t) x - arc->cx;
+    int64_t dy = (int64_t) y - arc->cy;
+    return in_sweep || arc_on_ray(arc->start_vx, arc->start_vy, dx, dy)
+        || arc_on_ray(arc->end_vx, arc->end_vy, dx, dy);
+}
+
 bool shape_contains(struct ShapeData *shape, int x, int y)
 {
     switch (shape->kind) {
@@ -350,6 +516,8 @@ bool shape_contains(struct ShapeData *shape, int x, int y)
             return line_contains((const struct ShapeLine *) shape, x, y);
         case ShapeKindEllipse:
             return ellipse_contains((const struct ShapeEllipse *) shape, x, y);
+        case ShapeKindArc:
+            return arc_contains((const struct ShapeArc *) shape, x, y);
         default:
             return false;
     }
@@ -503,6 +671,153 @@ static int convex_run(struct ShapeConvex *convex, int x, int y, int end, bool *i
     return end - x;
 }
 
+static int find_change(const struct ShapeArc *arc, int y, int lo, int hi,
+    bool (*pred)(const struct ShapeArc *, int, int))
+{
+    if (lo >= hi) {
+        return hi;
+    }
+    bool base = pred(arc, lo, y);
+    int l = lo;
+    int h = hi;
+    while (l < h) {
+        int mid = l + (h - l) / 2;
+        if (pred(arc, mid, y) == base) {
+            l = mid + 1;
+        } else {
+            h = mid;
+        }
+    }
+    return l;
+}
+
+static void arc_add_breakpoint(int *bps, int *n, int x, int bx, int end)
+{
+    if (x < bx) {
+        x = bx;
+    } else if (x > end) {
+        x = end;
+    }
+    for (int i = 0; i < *n; i++) {
+        if (bps[i] == x) {
+            return;
+        }
+    }
+    int i = *n;
+    while (i > 0 && bps[i - 1] > x) {
+        bps[i] = bps[i - 1];
+        i--;
+    }
+    bps[i] = x;
+    (*n)++;
+}
+
+static void arc_add_ray_breakpoints(const struct ShapeArc *arc, int32_t vx, int32_t vy, int y,
+    int *bps, int *n)
+{
+    int32_t dy = y - arc->cy;
+    int32_t k = 2 * vx * dy;
+    int32_t s = (vx < 0 ? -vx : vx) + (vy < 0 ? -vy : vy);
+    int32_t lo = -arc->radius;
+    int32_t hi = arc->radius;
+    if (vy > 0) {
+        lo = int_max(lo, ceil_div32(k - s, 2 * vy));
+        hi = int_min(hi, floor_div32(k + s, 2 * vy));
+    } else if (vy < 0) {
+        lo = int_max(lo, ceil_div32(-(k + s), -2 * vy));
+        hi = int_min(hi, floor_div32(s - k, -2 * vy));
+    } else if (k < -s || k > s) {
+        return;
+    }
+    int32_t m = vy * dy;
+    if (vx > 0) {
+        lo = int_max(lo, ceil_div32(-m, vx));
+    } else if (vx < 0) {
+        hi = int_min(hi, floor_div32(m, -vx));
+    } else if (m < 0) {
+        return;
+    }
+    if (lo <= hi) {
+        int bx = arc->base.x;
+        int end = arc->base.x + arc->base.w;
+        arc_add_breakpoint(bps, n, arc->cx + lo, bx, end);
+        arc_add_breakpoint(bps, n, arc->cx + hi + 1, bx, end);
+    }
+}
+
+static void arc_update_row(struct ShapeArc *arc, int y)
+{
+    int bx = arc->base.x;
+    int end = arc->base.x + arc->base.w;
+    _Static_assert(13 <= ARC_MAX_SEGMENTS + 1, "bps too small for arc_update_row's breakpoint inserts");
+    int bps[ARC_MAX_SEGMENTS + 1];
+    int n = 0;
+    arc_add_breakpoint(bps, &n, bx, bx, end);
+    arc_add_breakpoint(bps, &n, end, bx, end);
+
+    int c = arc->cx;
+    if (c < bx) {
+        c = bx;
+    } else if (c > end) {
+        c = end;
+    }
+    arc_add_breakpoint(bps, &n, c, bx, end);
+
+    bool have_hole = arc->radius - arc->thickness > 0;
+    if (bx < c) {
+        arc_add_breakpoint(bps, &n, find_change(arc, y, bx, c, arc_in_outer), bx, end);
+        if (have_hole) {
+            arc_add_breakpoint(bps, &n, find_change(arc, y, bx, c, arc_in_hole), bx, end);
+        }
+    }
+    if (c < end) {
+        arc_add_breakpoint(bps, &n, find_change(arc, y, c, end, arc_in_outer), bx, end);
+        if (have_hole) {
+            arc_add_breakpoint(bps, &n, find_change(arc, y, c, end, arc_in_hole), bx, end);
+        }
+    }
+
+    if (arc->sweep != 360) {
+        arc_add_breakpoint(bps, &n, find_change(arc, y, bx, end, arc_cross_a), bx, end);
+        arc_add_breakpoint(bps, &n, find_change(arc, y, bx, end, arc_cross_b), bx, end);
+        arc_add_ray_breakpoints(arc, arc->start_vx, arc->start_vy, y, bps, &n);
+        arc_add_ray_breakpoints(arc, arc->end_vx, arc->end_vy, y, bps, &n);
+    }
+
+    int seg_count = 0;
+    arc->seg_start[0] = bps[0];
+    bool prev_inside = arc_contains(arc, bps[0], y);
+    for (int i = 1; i < n; i++) {
+        bool inside = arc_contains(arc, bps[i], y);
+        if (inside != prev_inside) {
+            arc->seg_inside[seg_count] = prev_inside;
+            seg_count++;
+            arc->seg_start[seg_count] = bps[i];
+            prev_inside = inside;
+        }
+    }
+    arc->seg_inside[seg_count] = prev_inside;
+    seg_count++;
+    arc->seg_start[seg_count] = end;
+
+    arc->seg_count = seg_count;
+    arc->seg_row = y;
+}
+
+static int arc_run(struct ShapeArc *arc, int x, int y, bool *inside)
+{
+    if (arc->seg_row != y) {
+        arc_update_row(arc, y);
+    }
+
+    int i = 0;
+    while (i + 1 < arc->seg_count && arc->seg_start[i + 1] <= x) {
+        i++;
+    }
+    *inside = arc->seg_inside[i];
+    return arc->seg_start[i + 1] - x;
+}
+
 int shape_run(struct ShapeData *shape, int x, int y, bool *inside)
 {
     int bx = shape->x;
@@ -522,6 +837,8 @@ int shape_run(struct ShapeData *shape, int x, int y, bool *inside)
         case ShapeKindLine:
         case ShapeKindEllipse:
             return convex_run((struct ShapeConvex *) shape, x, y, end, inside);
+        case ShapeKindArc:
+            return arc_run((struct ShapeArc *) shape, x, y, inside);
         default:
             *inside = false;
             return 1;
@@ -564,6 +881,15 @@ bool shape_equal(const struct ShapeData *a, const struct ShapeData *b)
             const struct ShapeEllipse *e_b = (const struct ShapeEllipse *) b;
             return e_a->cx == e_b->cx && e_a->cy == e_b->cy && e_a->rx == e_b->rx
                 && e_a->ry == e_b->ry;
+        }
+        case ShapeKindArc: {
+            const struct ShapeArc *arc_a = (const struct ShapeArc *) a;
+            const struct ShapeArc *arc_b = (const struct ShapeArc *) b;
+            return arc_a->cx == arc_b->cx && arc_a->cy == arc_b->cy
+                && arc_a->radius == arc_b->radius && arc_a->thickness == arc_b->thickness
+                && arc_a->sweep == arc_b->sweep && arc_a->start_vx == arc_b->start_vx
+                && arc_a->start_vy == arc_b->start_vy && arc_a->end_vx == arc_b->end_vx
+                && arc_a->end_vy == arc_b->end_vy;
         }
         default:
             return false;

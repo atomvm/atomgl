@@ -30,7 +30,8 @@ typedef enum
 {
     ShapeKindRoundedRect,
     ShapeKindLine,
-    ShapeKindEllipse
+    ShapeKindEllipse,
+    ShapeKindArc
 } shape_kind_t;
 
 struct ShapeData;
@@ -38,6 +39,8 @@ struct ShapeData;
 struct ShapeData *shape_new_rounded_rect(int x, int y, int w, int h, int radius);
 struct ShapeData *shape_new_line(int x1, int y1, int x2, int y2, int thickness);
 struct ShapeData *shape_new_ellipse(int cx, int cy, int rx, int ry);
+struct ShapeData *shape_new_arc(int cx, int cy, int radius, int thickness, int start_deg,
+    int end_deg);
 void shape_destroy(struct ShapeData *shape);
 
 shape_kind_t shape_kind(const struct ShapeData *shape);

@@ -373,6 +373,13 @@ static void test_shape_invalid(void)
         tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(2), atom("red")));
     expect_invalid("rounded_rect radius above limit",
         tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(SHAPE_VALUE_LIMIT + 1), c));
+    expect_invalid("arc equal angles",
+        tuple(8, atom("arc"), term_from_int(20), term_from_int(20), term_from_int(10), term_from_int(3), term_from_int(45), term_from_int(45), c));
+    expect_invalid("arc angle not an integer",
+        tuple(8, atom("arc"), term_from_int(20), term_from_int(20), term_from_int(10), term_from_int(3), atom("a"), term_from_int(45), c));
+    expect_invalid("arc thickness above limit",
+        tuple(8, atom("arc"), term_from_int(20), term_from_int(20), term_from_int(10), term_from_int(SHAPE_VALUE_LIMIT + 1),
+            term_from_int(0), term_from_int(90), c));
 
     if (big_ints()) {
         avm_int_t wrap = ((avm_int_t) 1 << 32) + 5;
@@ -384,6 +391,10 @@ static void test_shape_invalid(void)
             tuple(5, atom("circle"), term_from_int(wrap), term_from_int(10), term_from_int(3), c));
         expect_invalid("line thickness 2^32 + 1",
             tuple(7, atom("line"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(wrap - 4), c));
+        avm_int_t huge = (avm_int_t) 1 << 40;
+        expect_invalid("arc equal huge angles",
+            tuple(8, atom("arc"), term_from_int(20), term_from_int(20), term_from_int(10), term_from_int(3), term_from_int(huge),
+                term_from_int(huge), c));
     }
 }
 
@@ -484,6 +495,24 @@ static void check_shape(const char *name, term req, shape_kind_t kind, int x, in
     }
 }
 
+static void check_arc_sweep(avm_int_t start, avm_int_t end, int sweep)
+{
+    BaseDisplayItem item;
+    char name[96];
+    snprintf(name, sizeof(name), "arc %lld..%lld", (long long) start, (long long) end);
+    check_shape(name,
+        tuple(8, atom("arc"), term_from_int(20), term_from_int(20), term_from_int(10), term_from_int(3), term_from_int(start), term_from_int(end),
+            term_from_int(0x123456)),
+        ShapeKindArc, 10, 10, 21, 21, &item);
+    if (item.primitive == PrimitiveShape) {
+        int ref_start = (int) (((start % 360) + 360) % 360);
+        struct ShapeData *ref = shape_new_arc(20, 20, 10, 3, ref_start, ref_start + sweep);
+        CHECK(ref != NULL && shape_equal(item.data.shape_data.shape, ref), "%s: sweep is not %d", name, sweep);
+        shape_destroy(ref);
+        delete_item(&item);
+    }
+}
+
 static void test_shape_valid(void)
 {
     term c = term_from_int(0x123456);
@@ -500,6 +529,26 @@ static void test_shape_valid(void)
     check_shape("circle at the value limit",
         tuple(5, atom("circle"), term_from_int(-SHAPE_VALUE_LIMIT), term_from_int(SHAPE_VALUE_LIMIT), term_from_int(SHAPE_VALUE_LIMIT), c),
         ShapeKindEllipse, -2 * SHAPE_VALUE_LIMIT, 0, 2 * SHAPE_VALUE_LIMIT + 1, 2 * SHAPE_VALUE_LIMIT + 1, NULL);
+
+    check_arc_sweep(0, 90, 90);
+    check_arc_sweep(0, -90, 270);
+    check_arc_sweep(0, -359, 1);
+    check_arc_sweep(0, 400, 40);
+    check_arc_sweep(0, 360, 360);
+    check_arc_sweep(0, -360, 360);
+    check_arc_sweep(0, 720, 360);
+    check_arc_sweep(-720, 0, 360);
+    check_arc_sweep(350, 10, 20);
+    check_arc_sweep(10, 350, 340);
+    if (big_ints()) {
+        avm_int_t huge = (avm_int_t) 1 << 40;
+        check_arc_sweep(huge, huge + 90, 90);
+        check_arc_sweep(huge, huge + 360, 360);
+        check_arc_sweep(-huge, -huge - 90, 270);
+        avm_int_t turns = (avm_int_t) 360 << 32;
+        check_arc_sweep(turns + 5, 5, 360);
+        check_arc_sweep(turns + 5, 95, 90);
+    }
 }
 
 static void test_integer_forms(void)
@@ -531,6 +580,35 @@ static void test_integer_forms(void)
     expect_invalid("circle radius boxed 2^40",
         tuple(5, atom("circle"), term_from_int(0), term_from_int(0), boxed_int((avm_int64_t) 1 << 40), term_from_int(0)));
 
+    struct
+    {
+        avm_int64_t start;
+        avm_int64_t end;
+        int ref_start;
+        int sweep;
+    } arcs[] = {
+        { (avm_int64_t) 1 << 27, ((avm_int64_t) 1 << 27) + 90, (int) (((avm_int64_t) 1 << 27) % 360), 90 },
+        { -((avm_int64_t) 1 << 27), 0, (int) (360 - ((avm_int64_t) 1 << 27) % 360), (int) (((avm_int64_t) 1 << 27) % 360) },
+        { INT64_MAX, INT64_MAX - 10, (int) (INT64_MAX % 360), 350 },
+        { INT64_MIN, 0, (int) (360 + INT64_MIN % 360), (int) (-(INT64_MIN % 360)) },
+        { (avm_int64_t) 360 << 40, 0, 0, 360 },
+    };
+    for (size_t i = 0; i < sizeof(arcs) / sizeof(arcs[0]); i++) {
+        parse(tuple(8, atom("arc"), term_from_int(20), term_from_int(20), term_from_int(10), term_from_int(3), boxed_int(arcs[i].start),
+                  boxed_int(arcs[i].end), term_from_int(0)),
+            &item);
+        CHECK(item.primitive == PrimitiveShape, "boxed arc %zu: primitive %d", i, item.primitive);
+        if (item.primitive == PrimitiveShape) {
+            struct ShapeData *ref = shape_new_arc(20, 20, 10, 3, arcs[i].ref_start, arcs[i].ref_start + arcs[i].sweep);
+            CHECK(ref != NULL && shape_equal(item.data.shape_data.shape, ref), "boxed arc %zu: expected %d + %d", i,
+                arcs[i].ref_start, arcs[i].sweep);
+            shape_destroy(ref);
+        }
+        delete_item(&item);
+    }
+    expect_invalid("arc equal boxed angles",
+        tuple(8, atom("arc"), term_from_int(20), term_from_int(20), term_from_int(10), term_from_int(3), boxed_int(INT64_MIN),
+            boxed_int(INT64_MIN), term_from_int(0)));
 }
 
 static term text_binary(const char *text)

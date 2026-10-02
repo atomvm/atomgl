@@ -123,6 +123,12 @@ static bool get_bgcolor_element(term req, int index, uint32_t *out, Context *ctx
     return get_color_element(req, index, out);
 }
 
+static int normalize_deg(avm_int64_t deg)
+{
+    deg %= 360;
+    return (int) ((deg < 0) ? deg + 360 : deg);
+}
+
 static bool get_rgba8888_image(term img, struct ImageDataWithSize *out, Context *ctx)
 {
     if (UNLIKELY(!term_is_tuple(img) || term_get_tuple_arity(img) != 4
@@ -228,7 +234,8 @@ typedef enum
     ShapeCmdRoundedRect,
     ShapeCmdLine,
     ShapeCmdCircle,
-    ShapeCmdEllipse
+    ShapeCmdEllipse,
+    ShapeCmdArc
 } shape_cmd_t;
 
 static shape_cmd_t get_shape_cmd(term cmd, Context *ctx)
@@ -241,6 +248,8 @@ static shape_cmd_t get_shape_cmd(term cmd, Context *ctx)
         return ShapeCmdCircle;
     } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x7", "ellipse"))) {
         return ShapeCmdEllipse;
+    } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x3", "arc"))) {
+        return ShapeCmdArc;
     }
     return ShapeCmdNone;
 }
@@ -251,6 +260,7 @@ static const char *init_shape_item(BaseDisplayItem *item, term req, Context *ctx
     struct ShapeData *shape = NULL;
     bool ok = false;
     int a, b, c, d, e;
+    avm_int64_t start, end;
     uint32_t color = 0;
 
     switch (cmd) {
@@ -279,6 +289,22 @@ static const char *init_shape_item(BaseDisplayItem *item, term req, Context *ctx
                 && get_shape_value_element(req, 3, &c) && get_shape_value_element(req, 4, &d)
                 && get_color_element(req, 5, &color)
                 && (shape = shape_new_ellipse(a, b, c, d)) != NULL;
+            break;
+
+        case ShapeCmdArc:
+            ok = arity == 8 && get_shape_value_element(req, 1, &a) && get_shape_value_element(req, 2, &b)
+                && get_shape_value_element(req, 3, &c) && get_shape_value_element(req, 4, &d)
+                && get_int_element(req, 5, &start) && get_int_element(req, 6, &end)
+                && get_color_element(req, 7, &color);
+            if (ok) {
+                int start_deg = normalize_deg(start);
+                int end_deg = normalize_deg(end);
+                if (start != end && start_deg == end_deg) {
+                    end_deg += 360;
+                }
+                shape = shape_new_arc(a, b, c, d, start_deg, end_deg);
+                ok = shape != NULL;
+            }
             break;
 
         default:
