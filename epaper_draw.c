@@ -20,6 +20,7 @@
 
 #include "epaper_draw.h"
 
+#include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -133,6 +134,27 @@ int epaper_draw_rect_x(const struct EpaperScreen *screen,
     return drawn_pixels;
 }
 
+int epaper_draw_shape_x(const struct EpaperScreen *screen,
+    uint8_t *line_buf, int xpos, int ypos, int max_line_len,
+    BaseDisplayItem *item,
+    int *outside_run)
+{
+    if (display_items_shape_outside_run(item, xpos, ypos, outside_run)) {
+        return 0;
+    }
+    bool inside;
+    int run = shape_run(item->data.shape_data.shape, xpos, ypos, &inside);
+    if (!inside) {
+        display_items_shape_remember_outside(item, xpos, ypos, run);
+        *outside_run = run;
+        return 0;
+    }
+    if (run > max_line_len) {
+        run = max_line_len;
+    }
+    return epaper_draw_rect_x(screen, line_buf, xpos, ypos, run, item);
+}
+
 int epaper_draw_text_x(const struct EpaperScreen *screen,
     uint8_t *line_buf, int xpos, int ypos, int max_line_len,
     BaseDisplayItem *item)
@@ -229,44 +251,41 @@ int epaper_draw_scaled_cropped_img_x(const struct EpaperScreen *screen,
     }
 
     int width = item->width;
-    const char *data = item->data.image_data_with_size.pix;
 
     int drawn_pixels = 0;
-
-    int y_scale = item->y_scale;
-    int x_scale = item->x_scale;
-    int img_width = item->data.image_data_with_size.width;
-
-    int source_x = item->source_x;
-    int source_y = item->source_y;
-
-    uint32_t *pixels = ((uint32_t *) data) + (source_y + ((ypos - y) / y_scale)) * img_width + source_x + ((xpos - x) / x_scale);
 
     if (width > xpos - x + max_line_len) {
         width = xpos - x + max_line_len;
     }
 
-    for (int j = xpos - x; j < width; j++) {
-        uint32_t img_pixel = READ_32_UNALIGNED(pixels);
-        if ((*pixels >> 24) & 0xFF) {
-            uint8_t r = img_pixel >> 24;
-            uint8_t g = (img_pixel >> 16) & 0xFF;
-            uint8_t b = (img_pixel >> 8) & 0xFF;
+    struct ScaledCroppedRow src;
+    display_items_scaled_cropped_row_init(&src, item, ypos - y);
 
-            uint8_t c = epaper_dither_acep7(xpos + drawn_pixels, ypos, r, g, b,
-                screen->palette, screen->palette_size);
-            epaper_draw_pixel_x(screen, line_buf, xpos + drawn_pixels, c);
+    int j = xpos - x;
+    while (j < width) {
+        int span_end = display_items_scaled_cropped_span(&src, j, width);
+        for (; j < span_end; j++) {
+            const uint32_t *pixels = display_items_scaled_cropped_row_pixel(&src, j);
+            uint32_t img_pixel = READ_32_UNALIGNED(pixels);
+            if ((*pixels >> 24) & 0xFF) {
+                uint8_t r = img_pixel >> 24;
+                uint8_t g = (img_pixel >> 16) & 0xFF;
+                uint8_t b = (img_pixel >> 8) & 0xFF;
 
-        } else if (visible_bg) {
-            uint8_t c = epaper_dither_acep7(xpos + drawn_pixels, ypos, bgcolor_r, bgcolor_g, bgcolor_b,
-                screen->palette, screen->palette_size);
-            epaper_draw_pixel_x(screen, line_buf, xpos + drawn_pixels, c);
+                uint8_t c = epaper_dither_acep7(xpos + drawn_pixels, ypos, r, g, b,
+                    screen->palette, screen->palette_size);
+                epaper_draw_pixel_x(screen, line_buf, xpos + drawn_pixels, c);
 
-        } else {
-            return drawn_pixels;
+            } else if (visible_bg) {
+                uint8_t c = epaper_dither_acep7(xpos + drawn_pixels, ypos, bgcolor_r, bgcolor_g, bgcolor_b,
+                    screen->palette, screen->palette_size);
+                epaper_draw_pixel_x(screen, line_buf, xpos + drawn_pixels, c);
+
+            } else {
+                return drawn_pixels;
+            }
+            drawn_pixels++;
         }
-        drawn_pixels++;
-        pixels = ((uint32_t *) data) + (source_y + ((ypos - y) / y_scale)) * img_width + source_x + ((j + 1) / x_scale);
     }
 
     return drawn_pixels;
@@ -277,7 +296,7 @@ int epaper_draw_x(const struct EpaperScreen *screen,
     BaseDisplayItem items[], size_t items_len)
 {
     int line_len = screen->w - xpos;
-    bool below = false;
+    int transparent_run = INT_MAX;
 
     for (size_t i = 0; i < items_len; i++) {
         BaseDisplayItem *item = &items[i];
@@ -295,8 +314,9 @@ int epaper_draw_x(const struct EpaperScreen *screen,
             continue;
         }
 
-        int max_line_len = below ? 1 : line_len;
+        int max_line_len = (line_len < transparent_run) ? line_len : transparent_run;
 
+        int run = 1;
         int drawn_pixels = 0;
         switch (items[i].primitive) {
             case PrimitiveImage:
@@ -315,6 +335,10 @@ int epaper_draw_x(const struct EpaperScreen *screen,
                 drawn_pixels = epaper_draw_text_x(screen, line_buf, xpos, ypos, max_line_len, item);
                 break;
 
+            case PrimitiveShape:
+                drawn_pixels = epaper_draw_shape_x(screen, line_buf, xpos, ypos, max_line_len, item, &run);
+                break;
+
             default: {
                 fprintf(stderr, "unexpected display list command.\n");
             }
@@ -324,7 +348,9 @@ int epaper_draw_x(const struct EpaperScreen *screen,
             return drawn_pixels;
         }
 
-        below = true;
+        if (run < transparent_run) {
+            transparent_run = run;
+        }
     }
 
     return 1;

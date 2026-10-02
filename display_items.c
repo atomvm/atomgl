@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <defaultatoms.h>
 #include <interop.h>
 #include <utils.h>
 
@@ -96,6 +97,11 @@ static bool get_coord_element(term req, int index, int *out)
     return get_bounded_element(req, index, -DISPLAY_ITEMS_COORD_LIMIT, DISPLAY_ITEMS_COORD_LIMIT, out);
 }
 
+static bool get_shape_value_element(term req, int index, int *out)
+{
+    return get_bounded_element(req, index, -SHAPE_VALUE_LIMIT, SHAPE_VALUE_LIMIT, out);
+}
+
 static bool get_color_element(term req, int index, uint32_t *out)
 {
     avm_int64_t color;
@@ -115,6 +121,12 @@ static bool get_bgcolor_element(term req, int index, uint32_t *out, Context *ctx
     }
 
     return get_color_element(req, index, out);
+}
+
+static int normalize_deg(avm_int64_t deg)
+{
+    deg %= 360;
+    return (int) ((deg < 0) ? deg + 360 : deg);
 }
 
 static bool get_rgba8888_image(term img, struct ImageDataWithSize *out, Context *ctx)
@@ -193,8 +205,151 @@ static const char *init_scaled_cropped_image_item(BaseDisplayItem *item, term re
         item->height = max_height;
     }
 
+    term flip_x = globalcontext_make_atom(ctx->global, ATOM_STR("\x6", "flip_x"));
+    term flip_y = globalcontext_make_atom(ctx->global, ATOM_STR("\x6", "flip_y"));
+    term opts = term_get_tuple_element(req, 10);
+    while (term_is_nonempty_list(opts)) {
+        term opt = term_get_list_head(opts);
+        if (term_is_tuple(opt) && term_get_tuple_arity(opt) == 2
+            && term_get_tuple_element(opt, 1) == TRUE_ATOM) {
+            opt = term_get_tuple_element(opt, 0);
+        }
+        if (opt == flip_x) {
+            item->flip_x = true;
+        } else if (opt == flip_y) {
+            item->flip_y = true;
+        }
+        opts = term_get_list_tail(opts);
+    }
+
     item->primitive = PrimitiveScaledCroppedImage;
     item->data.image_data_with_size = img;
+
+    return NULL;
+}
+
+typedef enum
+{
+    ShapeCmdNone,
+    ShapeCmdRoundedRect,
+    ShapeCmdLine,
+    ShapeCmdCircle,
+    ShapeCmdEllipse,
+    ShapeCmdArc,
+    ShapeCmdPolygon
+} shape_cmd_t;
+
+static shape_cmd_t get_shape_cmd(term cmd, Context *ctx)
+{
+    if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\xC", "rounded_rect"))) {
+        return ShapeCmdRoundedRect;
+    } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x4", "line"))) {
+        return ShapeCmdLine;
+    } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x6", "circle"))) {
+        return ShapeCmdCircle;
+    } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x7", "ellipse"))) {
+        return ShapeCmdEllipse;
+    } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x3", "arc"))) {
+        return ShapeCmdArc;
+    } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x7", "polygon"))) {
+        return ShapeCmdPolygon;
+    }
+    return ShapeCmdNone;
+}
+
+static struct ShapeData *new_polygon(term list)
+{
+    int proper;
+    int len = term_list_length(list, &proper);
+    if (!proper || len < 3 || len > SHAPE_POLYGON_MAX_POINTS) {
+        return NULL;
+    }
+    struct ShapePoint *points = malloc(sizeof(struct ShapePoint) * len);
+    if (points == NULL) {
+        return NULL;
+    }
+    for (int i = 0; i < len; i++) {
+        term pt = term_get_list_head(list);
+        if (!term_is_tuple(pt) || term_get_tuple_arity(pt) != 2
+            || !get_shape_value_element(pt, 0, &points[i].x) || !get_shape_value_element(pt, 1, &points[i].y)) {
+            free(points);
+            return NULL;
+        }
+        list = term_get_list_tail(list);
+    }
+    return shape_new_polygon_owned(points, len);
+}
+
+static const char *init_shape_item(BaseDisplayItem *item, term req, Context *ctx, shape_cmd_t cmd)
+{
+    int arity = term_get_tuple_arity(req);
+    struct ShapeData *shape = NULL;
+    bool ok = false;
+    int a, b, c, d, e;
+    avm_int64_t start, end;
+    uint32_t color = 0;
+
+    switch (cmd) {
+        case ShapeCmdRoundedRect:
+            ok = arity == 7 && get_shape_value_element(req, 1, &a) && get_shape_value_element(req, 2, &b)
+                && get_shape_value_element(req, 3, &c) && get_shape_value_element(req, 4, &d)
+                && get_shape_value_element(req, 5, &e) && get_color_element(req, 6, &color)
+                && (shape = shape_new_rounded_rect(a, b, c, d, e)) != NULL;
+            break;
+
+        case ShapeCmdLine:
+            ok = arity == 7 && get_shape_value_element(req, 1, &a) && get_shape_value_element(req, 2, &b)
+                && get_shape_value_element(req, 3, &c) && get_shape_value_element(req, 4, &d)
+                && get_shape_value_element(req, 5, &e) && get_color_element(req, 6, &color)
+                && (shape = shape_new_line(a, b, c, d, e)) != NULL;
+            break;
+
+        case ShapeCmdCircle:
+            ok = arity == 5 && get_shape_value_element(req, 1, &a) && get_shape_value_element(req, 2, &b)
+                && get_shape_value_element(req, 3, &c) && get_color_element(req, 4, &color)
+                && (shape = shape_new_ellipse(a, b, c, c)) != NULL;
+            break;
+
+        case ShapeCmdEllipse:
+            ok = arity == 6 && get_shape_value_element(req, 1, &a) && get_shape_value_element(req, 2, &b)
+                && get_shape_value_element(req, 3, &c) && get_shape_value_element(req, 4, &d)
+                && get_color_element(req, 5, &color)
+                && (shape = shape_new_ellipse(a, b, c, d)) != NULL;
+            break;
+
+        case ShapeCmdArc:
+            ok = arity == 8 && get_shape_value_element(req, 1, &a) && get_shape_value_element(req, 2, &b)
+                && get_shape_value_element(req, 3, &c) && get_shape_value_element(req, 4, &d)
+                && get_int_element(req, 5, &start) && get_int_element(req, 6, &end)
+                && get_color_element(req, 7, &color);
+            if (ok) {
+                int start_deg = normalize_deg(start);
+                int end_deg = normalize_deg(end);
+                if (start != end && start_deg == end_deg) {
+                    end_deg += 360;
+                }
+                shape = shape_new_arc(a, b, c, d, start_deg, end_deg);
+                ok = shape != NULL;
+            }
+            break;
+
+        case ShapeCmdPolygon:
+            ok = arity == 3 && get_color_element(req, 2, &color)
+                && (shape = new_polygon(term_get_tuple_element(req, 1))) != NULL;
+            break;
+
+        default:
+            break;
+    }
+
+    if (!ok) {
+        return "wrong arity, bad argument or out of memory";
+    }
+
+    item->primitive = PrimitiveShape;
+    item->brcolor = color;
+    item->data.shape_data.shape = shape;
+    shape_bounds(shape, &item->x, &item->y, &item->width, &item->height);
 
     return NULL;
 }
@@ -371,6 +526,7 @@ static const char *init_item(BaseDisplayItem *item, term req, Context *ctx)
     }
 
     term cmd = term_get_tuple_element(req, 0);
+    shape_cmd_t shape_cmd;
     const char *reason;
 
     if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x5", "image"))) {
@@ -384,6 +540,9 @@ static const char *init_item(BaseDisplayItem *item, term req, Context *ctx)
 
     } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x4", "text"))) {
         reason = init_text_item(item, req, ctx);
+
+    } else if ((shape_cmd = get_shape_cmd(cmd, ctx)) != ShapeCmdNone) {
+        reason = init_shape_item(item, req, ctx, shape_cmd);
 
     } else {
         reason = "unknown command";
@@ -483,6 +642,10 @@ void display_items_delete(BaseDisplayItem items[], size_t items_len)
 
             case PrimitiveText:
                 free((char *) item->data.text_data.text);
+                break;
+
+            case PrimitiveShape:
+                shape_destroy(item->data.shape_data.shape);
                 break;
 
             default: {

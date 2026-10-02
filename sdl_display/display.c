@@ -19,6 +19,7 @@
  */
 
 #include <SDL.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -138,7 +139,11 @@ static bool cmp_display_item(BaseDisplayItem *a, BaseDisplayItem *b)
         case PrimitiveScaledCroppedImage:
             return (a->data.image_data.pix == b->data.image_data.pix) &&
                 (a->x_scale == b->x_scale) && (a->y_scale == b->y_scale) &&
-                (a->source_x == b->source_x) && (a->source_y == b->source_y);
+                (a->source_x == b->source_x) && (a->source_y == b->source_y) &&
+                (a->flip_x == b->flip_x) && (a->flip_y == b->flip_y);
+
+        case PrimitiveShape:
+            return shape_equal(a->data.shape_data.shape, b->data.shape_data.shape);
 
         default: {
             return true;
@@ -288,36 +293,34 @@ static int draw_scaled_cropped_img_x(int xpos, int ypos, int max_line_len, BaseD
     }
 
     int width = item->width;
-    const char *data = item->data.image_data_with_size.pix;
 
     int drawn_pixels = 0;
 
-    int y_scale = item->y_scale;
-    int x_scale = item->x_scale;
-    int img_width = item->data.image_data_with_size.width;
-
-    int source_x = item->source_x;
-    int source_y = item->source_y;
-
-    uint32_t *pixels = ((uint32_t *) data) + (source_y + ((ypos - y) / y_scale)) * img_width + source_x + ((xpos - x) / x_scale);
     Uint32 *pixmem32 = (Uint32 *) (((uint8_t *) screen->pixels) + screen->w * ypos * BPP + xpos * BPP);
 
     if (width > xpos - x + max_line_len) {
         width = xpos - x + max_line_len;
     }
 
-    for (int j = xpos - x; j < width; j++) {
-        uint32_t img_pixel = READ_32_UNALIGNED(pixels);
-        if ((*pixels >> 24) & 0xFF) {
-            Uint32 color = uint32_color_to_surface(screen, img_pixel);
-            pixmem32[drawn_pixels] = color;
-        } else if (visible_bg) {
-            pixmem32[drawn_pixels] = bgcolor;
-        } else {
-            return drawn_pixels;
+    struct ScaledCroppedRow src;
+    display_items_scaled_cropped_row_init(&src, item, ypos - y);
+
+    int j = xpos - x;
+    while (j < width) {
+        int span_end = display_items_scaled_cropped_span(&src, j, width);
+        for (; j < span_end; j++) {
+            const uint32_t *pixels = display_items_scaled_cropped_row_pixel(&src, j);
+            uint32_t img_pixel = READ_32_UNALIGNED(pixels);
+            if ((*pixels >> 24) & 0xFF) {
+                Uint32 color = uint32_color_to_surface(screen, img_pixel);
+                pixmem32[drawn_pixels] = color;
+            } else if (visible_bg) {
+                pixmem32[drawn_pixels] = bgcolor;
+            } else {
+                return drawn_pixels;
+            }
+            drawn_pixels++;
         }
-        drawn_pixels++;
-        pixels = ((uint32_t *) data) + (source_y + ((ypos - y) / y_scale)) * img_width + source_x + ((j + 1) / x_scale);
     }
 
     return drawn_pixels;
@@ -343,6 +346,25 @@ static int draw_rect_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *it
     }
 
     return drawn_pixels;
+}
+
+static int draw_shape_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *item,
+    int *outside_run)
+{
+    if (display_items_shape_outside_run(item, xpos, ypos, outside_run)) {
+        return 0;
+    }
+    bool inside;
+    int run = shape_run(item->data.shape_data.shape, xpos, ypos, &inside);
+    if (!inside) {
+        display_items_shape_remember_outside(item, xpos, ypos, run);
+        *outside_run = run;
+        return 0;
+    }
+    if (run > max_line_len) {
+        run = max_line_len;
+    }
+    return draw_rect_x(xpos, ypos, run, item);
 }
 
 static int draw_text_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *item)
@@ -402,7 +424,7 @@ static int draw_text_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *it
 static int draw_x(int xpos, int ypos, BaseDisplayItem items[], size_t items_len)
 {
     int line_len = screen->w - xpos;
-    bool below = false;
+    int transparent_run = INT_MAX;
 
     for (size_t i = 0; i < items_len; i++) {
         BaseDisplayItem *item = &items[i];
@@ -420,8 +442,9 @@ static int draw_x(int xpos, int ypos, BaseDisplayItem items[], size_t items_len)
             continue;
         }
 
-        int max_line_len = below ? 1 : line_len;
+        int max_line_len = (line_len < transparent_run) ? line_len : transparent_run;
 
+        int run = 1;
         int drawn_pixels = 0;
         switch (items[i].primitive) {
             case PrimitiveImage:
@@ -440,6 +463,10 @@ static int draw_x(int xpos, int ypos, BaseDisplayItem items[], size_t items_len)
                 drawn_pixels = draw_text_x(xpos, ypos, max_line_len, item);
                 break;
 
+            case PrimitiveShape:
+                drawn_pixels = draw_shape_x(xpos, ypos, max_line_len, item, &run);
+                break;
+
             default: {
                 fprintf(stderr, "unexpected display list command.\n");
             }
@@ -449,7 +476,9 @@ static int draw_x(int xpos, int ypos, BaseDisplayItem items[], size_t items_len)
             return drawn_pixels;
         }
 
-        below = true;
+        if (run < transparent_run) {
+            transparent_run = run;
+        }
     }
 
     return 1;
