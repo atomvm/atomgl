@@ -19,6 +19,7 @@
  */
 
 #include <SDL.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
@@ -209,6 +210,25 @@ static int draw_rect_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *it
     return drawn_pixels;
 }
 
+static int draw_shape_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *item,
+    int *outside_run)
+{
+    if (display_items_shape_outside_run(item, xpos, ypos, outside_run)) {
+        return 0;
+    }
+    bool inside;
+    int run = shape_run(item->data.shape_data.shape, xpos, ypos, &inside);
+    if (!inside) {
+        display_items_shape_remember_outside(item, xpos, ypos, run);
+        *outside_run = run;
+        return 0;
+    }
+    if (run > max_line_len) {
+        run = max_line_len;
+    }
+    return draw_rect_x(xpos, ypos, run, item);
+}
+
 static int draw_text_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *item)
 {
     int x = item->x;
@@ -266,7 +286,7 @@ static int draw_text_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *it
 static int draw_x(int xpos, int ypos, BaseDisplayItem *row)
 {
     int line_len = screen->w - xpos;
-    bool below = false;
+    int transparent_run = INT_MAX;
 
     for (BaseDisplayItem *item = row; item != NULL; item = item->next) {
         if (xpos < item->x) {
@@ -280,8 +300,9 @@ static int draw_x(int xpos, int ypos, BaseDisplayItem *row)
             continue;
         }
 
-        int max_line_len = below ? 1 : line_len;
+        int max_line_len = (line_len < transparent_run) ? line_len : transparent_run;
 
+        int run = 1;
         int drawn_pixels = 0;
         switch (item->primitive) {
             case PrimitiveImage:
@@ -300,6 +321,10 @@ static int draw_x(int xpos, int ypos, BaseDisplayItem *row)
                 drawn_pixels = draw_text_x(xpos, ypos, max_line_len, item);
                 break;
 
+            case PrimitiveShape:
+                drawn_pixels = draw_shape_x(xpos, ypos, max_line_len, item, &run);
+                break;
+
             default: {
                 fprintf(stderr, "unexpected display list command.\n");
             }
@@ -309,7 +334,9 @@ static int draw_x(int xpos, int ypos, BaseDisplayItem *row)
             return drawn_pixels;
         }
 
-        below = true;
+        if (run < transparent_run) {
+            transparent_run = run;
+        }
     }
 
     return 1;

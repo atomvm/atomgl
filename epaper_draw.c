@@ -20,6 +20,7 @@
 
 #include "epaper_draw.h"
 
+#include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -131,6 +132,27 @@ int epaper_draw_rect_x(const struct EpaperScreen *screen,
     }
 
     return drawn_pixels;
+}
+
+int epaper_draw_shape_x(const struct EpaperScreen *screen,
+    uint8_t *line_buf, int xpos, int ypos, int max_line_len,
+    BaseDisplayItem *item,
+    int *outside_run)
+{
+    if (display_items_shape_outside_run(item, xpos, ypos, outside_run)) {
+        return 0;
+    }
+    bool inside;
+    int run = shape_run(item->data.shape_data.shape, xpos, ypos, &inside);
+    if (!inside) {
+        display_items_shape_remember_outside(item, xpos, ypos, run);
+        *outside_run = run;
+        return 0;
+    }
+    if (run > max_line_len) {
+        run = max_line_len;
+    }
+    return epaper_draw_rect_x(screen, line_buf, xpos, ypos, run, item);
 }
 
 int epaper_draw_text_x(const struct EpaperScreen *screen,
@@ -270,7 +292,7 @@ int epaper_draw_x(const struct EpaperScreen *screen,
     BaseDisplayItem *row)
 {
     int line_len = screen->w - xpos;
-    bool below = false;
+    int transparent_run = INT_MAX;
 
     for (BaseDisplayItem *item = row; item != NULL; item = item->next) {
         if (xpos < item->x) {
@@ -284,8 +306,9 @@ int epaper_draw_x(const struct EpaperScreen *screen,
             continue;
         }
 
-        int max_line_len = below ? 1 : line_len;
+        int max_line_len = (line_len < transparent_run) ? line_len : transparent_run;
 
+        int run = 1;
         int drawn_pixels = 0;
         switch (item->primitive) {
             case PrimitiveImage:
@@ -304,6 +327,10 @@ int epaper_draw_x(const struct EpaperScreen *screen,
                 drawn_pixels = epaper_draw_text_x(screen, line_buf, xpos, ypos, max_line_len, item);
                 break;
 
+            case PrimitiveShape:
+                drawn_pixels = epaper_draw_shape_x(screen, line_buf, xpos, ypos, max_line_len, item, &run);
+                break;
+
             default: {
                 fprintf(stderr, "unexpected display list command.\n");
             }
@@ -313,7 +340,9 @@ int epaper_draw_x(const struct EpaperScreen *screen,
             return drawn_pixels;
         }
 
-        below = true;
+        if (run < transparent_run) {
+            transparent_run = run;
+        }
     }
 
     return 1;

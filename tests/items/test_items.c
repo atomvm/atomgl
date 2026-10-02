@@ -356,11 +356,23 @@ static void test_image_invalid(void)
     }
 }
 
-static void test_command_invalid(void)
+static void test_shape_invalid(void)
 {
+    term c = term_from_int(0xFF0000);
+
     expect_invalid("not a tuple", term_from_int(3));
     expect_invalid("empty tuple", tuple(0));
     expect_invalid("unknown command", tuple(2, atom("triangle"), term_from_int(1)));
+    expect_invalid("rounded_rect color not an integer",
+        tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(2), atom("red")));
+    expect_invalid("rounded_rect radius above limit",
+        tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(SHAPE_VALUE_LIMIT + 1), c));
+
+    if (big_ints()) {
+        avm_int_t wrap = ((avm_int_t) 1 << 32) + 5;
+        expect_invalid("rounded_rect width 2^32 + 5",
+            tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(wrap), term_from_int(9), term_from_int(2), c));
+    }
 }
 
 static void test_image_valid(void)
@@ -434,6 +446,39 @@ static void test_scaled_cropped_image_valid(void)
     parse(sci(9, 9, 3, 1, 3, 3, flips(true, true), rgba(4, 2, pixels(32))), &item);
     CHECK(item.primitive == PrimitiveScaledCroppedImage, "sci at last pixel: primitive %d", item.primitive);
     delete_item(&item);
+}
+
+static void check_shape(const char *name, term req, shape_kind_t kind, int x, int y, int w, int h,
+    BaseDisplayItem *out)
+{
+    BaseDisplayItem item;
+    parse(req, &item);
+    CHECK(item.primitive == PrimitiveShape && item.data.shape_data.shape != NULL, "%s: primitive %d", name, item.primitive);
+    if (out) {
+        memset(out, 0, sizeof(*out));
+    }
+    if (item.primitive != PrimitiveShape) {
+        return;
+    }
+    CHECK(shape_kind(item.data.shape_data.shape) == kind, "%s: kind %d", name, shape_kind(item.data.shape_data.shape));
+    CHECK(item.brcolor == 0x123456FF, "%s: brcolor %#x", name, (unsigned) item.brcolor);
+    CHECK(item.x == x && item.y == y && item.width == w && item.height == h,
+        "%s: bbox (%d, %d, %d, %d), expected (%d, %d, %d, %d)", name, item.x, item.y, item.width,
+        item.height, x, y, w, h);
+    if (out) {
+        *out = item;
+    } else {
+        delete_item(&item);
+    }
+}
+
+static void test_shape_valid(void)
+{
+    term c = term_from_int(0x123456);
+
+    check_shape("rounded_rect",
+        tuple(7, atom("rounded_rect"), term_from_int(1), term_from_int(2), term_from_int(30), term_from_int(20), term_from_int(5), c),
+        ShapeKindRoundedRect, 1, 2, 30, 20, NULL);
 }
 
 static void test_integer_forms(void)
@@ -611,6 +656,13 @@ static void test_text(void)
     expect_invalid_on_alloc_failure("text", text(term_from_int(0), font, fg, transparent, string("abc")), 1);
 }
 
+static void test_alloc_failures(void)
+{
+    term c = term_from_int(0x123456);
+    expect_invalid_on_alloc_failure("rounded_rect",
+        tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(2), c), 1);
+}
+
 static term *heap_mark(void)
 {
     return heap.heap_ptr;
@@ -771,6 +823,42 @@ static void test_log_format(void)
     display_items_init_item(&item, bad_rect, &ctx);
     end_capture(log, sizeof(log));
     CHECK(strcmp(log, "invalid display list item (rect/5): wrong arity\n") == 0, "log of one item:\n%s", log);
+    heap_release(mark);
+}
+
+static void expect_reason(const char *name, term req, const char *expected)
+{
+    static char log[256];
+    BaseDisplayItem item;
+    begin_capture();
+    display_items_init_item(&item, req, &ctx);
+    end_capture(log, sizeof(log));
+    delete_item(&item);
+    CHECK(strcmp(log, expected) == 0, "%s: logged\n%s", name, log);
+}
+
+static void expect_reason_on_alloc_failure(const char *name, term req, const char *expected)
+{
+    alloc_counter_fail_at = alloc_counter_calls + 1;
+    expect_reason(name, req, expected);
+    alloc_counter_fail_at = -1;
+}
+
+static void test_shape_reasons(void)
+{
+    term *mark = heap_mark();
+    term c = term_from_int(0xFF0000);
+
+    expect_reason("rounded_rect arity",
+        tuple(6, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(2)),
+        "invalid display list item (rounded_rect/6): wrong arity\n");
+    expect_reason("rounded_rect zero width",
+        tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(2), c),
+        "invalid display list item (rounded_rect/7): bad position, size, radius or color\n");
+    expect_reason_on_alloc_failure("rounded_rect",
+        tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(2), c),
+        "invalid display list item (rounded_rect/7): out of memory\n");
+
     heap_release(mark);
 }
 
@@ -990,13 +1078,16 @@ int main(void)
 
     test_scaled_cropped_image_invalid();
     test_image_invalid();
-    test_command_invalid();
+    test_shape_invalid();
     test_image_valid();
     test_scaled_cropped_image_valid();
+    test_shape_valid();
     test_integer_forms();
     test_rect();
     test_text();
+    test_alloc_failures();
     test_log_format();
+    test_shape_reasons();
     test_new_list();
     test_huge_rect_pixels();
     test_image_pixels();

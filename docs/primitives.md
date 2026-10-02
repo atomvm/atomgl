@@ -24,8 +24,9 @@ specified in pixels, as are sizes. Subpixel or half-pixel values are not allowed
 - `rect` and `text` accept any coordinate and size. Values beyond ±32767 are clamped to that range
   without changing which pixels are drawn on screen, so `{rect, 0, 0, 100000, 100000, Color}`
   still fills the screen. A `rect` with a width or height of 0 or less draws nothing.
-- `image` and `scaled_cropped_image` coordinates, sizes, source offsets and scale factors, and
-  image widths and heights must be within ±32767, or the item is invalid.
+- `image` and `scaled_cropped_image` coordinates, sizes, source offsets and scale factors, image
+  widths and heights, and every value of a shape (coordinates, sizes and radii) must be within
+  ±32767, or the item is invalid.
 
 ### Invalid Items
 An item with a wrong arity, a value of the wrong type or out of range, or an unknown command is
@@ -60,6 +61,13 @@ performance implications.
 ### Text
 Text can be provided as either an Erlang string (a list) or an Elixir string (a binary). UTF-8
 encoding is supported.
+
+### Shapes
+Shape primitives (`rounded_rect`) paint only the pixels inside the shape; pixels in the bounding
+box but outside the shape show whatever item is below in the display list.
+
+Round edges use the midpoint rule: a pixel at offset `{DX, DY}` from the center is inside a radius
+`R` when `DX * DX + DY * DY < R * R + R`.
 
 ## image
 
@@ -124,6 +132,21 @@ the item invalid.
   TextColor, % RGB text color, a "hex color" can be used here
   BackgroundColor, % RGB background color, a "hex color" can be used here, or transparent atom
   Text % simple text string, UTF-8 can be used, rich text and control characters are not supported
+}
+```
+
+## rounded_rect
+
+Draws a filled rectangle with rounded corners. The corners are quarter circles centered on the
+pixels `Radius` pixels in from each corner, so a `2 * R + 1` square with radius `R` is the same as a
+circle of radius `R`. The radius clamp keeps a straight edge of at least one pixel on every side:
+a 12 pixel high button gets a radius of at most 5.
+
+```erlang
+{rounded_rect,
+  X, Y, Width, Height, % bounding rect in pixels
+  Radius, % corner radius in pixels, >= 0, clamped to (min(Width, Height) - 1) div 2
+  Color % RGB fill color
 }
 ```
 

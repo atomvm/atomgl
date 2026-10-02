@@ -97,6 +97,11 @@ static bool get_coord_element(term req, int index, int *out)
     return get_bounded_element(req, index, -DISPLAY_ITEMS_COORD_LIMIT, DISPLAY_ITEMS_COORD_LIMIT, out);
 }
 
+static bool get_shape_value_element(term req, int index, int *out)
+{
+    return get_bounded_element(req, index, -SHAPE_VALUE_LIMIT, SHAPE_VALUE_LIMIT, out);
+}
+
 static bool get_color_element(term req, int index, uint32_t *out)
 {
     avm_int64_t color;
@@ -215,6 +220,37 @@ static const char *init_scaled_cropped_image_item(BaseDisplayItem *item, term re
     item->data.image_data_with_size = img;
 
     return NULL;
+}
+
+static const char *init_shape_item(BaseDisplayItem *item, struct ShapeData *shape, uint32_t color)
+{
+    if (IS_NULL_PTR(shape)) {
+        return "out of memory";
+    }
+    item->primitive = PrimitiveShape;
+    item->brcolor = color;
+    item->data.shape_data.shape = shape;
+    shape_bounds(shape, &item->x, &item->y, &item->width, &item->height);
+
+    return NULL;
+}
+
+static const char *init_rounded_rect_item(BaseDisplayItem *item, term req)
+{
+    int x, y, width, height, radius;
+    uint32_t color;
+    if (UNLIKELY(term_get_tuple_arity(req) != 7)) {
+        return "wrong arity";
+    }
+    if (UNLIKELY(!get_shape_value_element(req, 1, &x) || !get_shape_value_element(req, 2, &y)
+            || !get_bounded_element(req, 3, 1, SHAPE_VALUE_LIMIT, &width)
+            || !get_bounded_element(req, 4, 1, SHAPE_VALUE_LIMIT, &height)
+            || !get_bounded_element(req, 5, 0, SHAPE_VALUE_LIMIT, &radius)
+            || !get_color_element(req, 6, &color))) {
+        return "bad position, size, radius or color";
+    }
+
+    return init_shape_item(item, shape_new_rounded_rect(x, y, width, height, radius), color);
 }
 
 static int clamp_coord(avm_int64_t v)
@@ -403,6 +439,9 @@ static const char *init_item(BaseDisplayItem *item, term req, Context *ctx)
     } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x4", "text"))) {
         reason = init_text_item(item, req, ctx);
 
+    } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\xC", "rounded_rect"))) {
+        reason = init_rounded_rect_item(item, req);
+
     } else {
         reason = "unknown command";
     }
@@ -501,6 +540,10 @@ void display_items_delete(BaseDisplayItem items[], size_t items_len)
 
             case PrimitiveText:
                 free((char *) item->data.text_data.text);
+                break;
+
+            case PrimitiveShape:
+                shape_destroy(item->data.shape_data.shape);
                 break;
 
             default: {

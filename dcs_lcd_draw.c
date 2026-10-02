@@ -20,6 +20,7 @@
 
 #include "dcs_lcd_draw.h"
 
+#include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -97,6 +98,26 @@ int dcs_lcd_draw_rect_x(const struct DCSLCDScreen *screen,
     }
 
     return drawn_pixels;
+}
+
+int dcs_lcd_draw_shape_x(const struct DCSLCDScreen *screen,
+    int xpos, int ypos, int max_line_len, BaseDisplayItem *item,
+    int *outside_run)
+{
+    if (display_items_shape_outside_run(item, xpos, ypos, outside_run)) {
+        return 0;
+    }
+    bool inside;
+    int run = shape_run(item->data.shape_data.shape, xpos, ypos, &inside);
+    if (!inside) {
+        display_items_shape_remember_outside(item, xpos, ypos, run);
+        *outside_run = run;
+        return 0;
+    }
+    if (run > max_line_len) {
+        run = max_line_len;
+    }
+    return dcs_lcd_draw_rect_x(screen, xpos, ypos, run, item);
 }
 
 int dcs_lcd_draw_text_x(const struct DCSLCDScreen *screen,
@@ -206,7 +227,7 @@ int dcs_lcd_draw_x(const struct DCSLCDScreen *screen,
     int xpos, int ypos, BaseDisplayItem *row)
 {
     int line_len = screen->w - xpos;
-    bool below = false;
+    int transparent_run = INT_MAX;
 
     for (BaseDisplayItem *item = row; item != NULL; item = item->next) {
         if (xpos < item->x) {
@@ -220,8 +241,9 @@ int dcs_lcd_draw_x(const struct DCSLCDScreen *screen,
             continue;
         }
 
-        int max_line_len = below ? 1 : line_len;
+        int max_line_len = (line_len < transparent_run) ? line_len : transparent_run;
 
+        int run = 1;
         int drawn_pixels = 0;
         switch (item->primitive) {
             case PrimitiveImage:
@@ -239,6 +261,11 @@ int dcs_lcd_draw_x(const struct DCSLCDScreen *screen,
             case PrimitiveText:
                 drawn_pixels = dcs_lcd_draw_text_x(screen, xpos, ypos, max_line_len, item);
                 break;
+
+            case PrimitiveShape:
+                drawn_pixels = dcs_lcd_draw_shape_x(screen, xpos, ypos, max_line_len, item, &run);
+                break;
+
             default: {
                 fprintf(stderr, "unexpected display list command.\n");
             }
@@ -248,7 +275,9 @@ int dcs_lcd_draw_x(const struct DCSLCDScreen *screen,
             return drawn_pixels;
         }
 
-        below = true;
+        if (run < transparent_run) {
+            transparent_run = run;
+        }
     }
 
     return 1;
