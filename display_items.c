@@ -123,6 +123,12 @@ static bool get_bgcolor_element(term req, int index, uint32_t *out, Context *ctx
     return get_color_element(req, index, out);
 }
 
+static int normalize_deg(avm_int64_t deg)
+{
+    deg %= 360;
+    return (int) ((deg < 0) ? deg + 360 : deg);
+}
+
 static bool get_rgba8888_image(term img, struct ImageDataWithSize *out, Context *ctx)
 {
     if (UNLIKELY(!term_is_tuple(img) || term_get_tuple_arity(img) != 4
@@ -301,6 +307,31 @@ static const char *init_line_item(BaseDisplayItem *item, term req)
     }
 
     return init_shape_item(item, shape_new_line(x1, y1, x2, y2, thickness), color);
+}
+
+static const char *init_arc_item(BaseDisplayItem *item, term req)
+{
+    int cx, cy, radius, thickness;
+    avm_int64_t start, end;
+    uint32_t color;
+    if (UNLIKELY(term_get_tuple_arity(req) != 8)) {
+        return "wrong arity";
+    }
+    if (UNLIKELY(!get_shape_value_element(req, 1, &cx) || !get_shape_value_element(req, 2, &cy)
+            || !get_bounded_element(req, 3, 1, SHAPE_VALUE_LIMIT, &radius)
+            || !get_bounded_element(req, 4, 1, SHAPE_VALUE_LIMIT, &thickness)
+            || !get_int_element(req, 5, &start) || !get_int_element(req, 6, &end) || start == end
+            || !get_color_element(req, 7, &color))) {
+        return "bad center, radius, thickness, angles or color";
+    }
+
+    int start_deg = normalize_deg(start);
+    int end_deg = normalize_deg(end);
+    if (start_deg == end_deg) {
+        end_deg += 360;
+    }
+
+    return init_shape_item(item, shape_new_arc(cx, cy, radius, thickness, start_deg, end_deg), color);
 }
 
 static int clamp_coord(avm_int64_t v)
@@ -500,6 +531,9 @@ static const char *init_item(BaseDisplayItem *item, term req, Context *ctx)
 
     } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x4", "line"))) {
         reason = init_line_item(item, req);
+
+    } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x3", "arc"))) {
+        reason = init_arc_item(item, req);
 
     } else {
         reason = "unknown command";

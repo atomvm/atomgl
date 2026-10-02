@@ -27,6 +27,7 @@ specified in pixels, as are sizes. Subpixel or half-pixel values are not allowed
 - `image` and `scaled_cropped_image` coordinates, sizes, source offsets and scale factors, image
   widths and heights, and every value of a shape (coordinates, sizes, radii and thicknesses) must
   be within ±32767, or the item is invalid.
+- Arc angles can be any integer.
 
 ### Invalid Items
 An item with a wrong arity, a value of the wrong type or out of range, or an unknown command is
@@ -63,11 +64,11 @@ Text can be provided as either an Erlang string (a list) or an Elixir string (a 
 encoding is supported.
 
 ### Shapes
-Shape primitives (`rounded_rect`, `line`, `circle`, `ellipse`) paint only the pixels inside the
-shape; pixels in the bounding box but outside the shape show whatever item is below in the display
-list.
+Shape primitives (`rounded_rect`, `line`, `circle`, `ellipse`, `arc`) paint only the pixels inside
+the shape; pixels in the bounding box but outside the shape show whatever item is below in the
+display list.
 
-`line`, `circle` and `ellipse` place their points on pixel centers: the pixel at `{X, Y}` is
+`line`, `circle`, `ellipse` and `arc` place their points on pixel centers: the pixel at `{X, Y}` is
 drawn when it is inside. Round edges use the midpoint rule: a pixel at offset `{DX, DY}` from the
 center is inside a radius `R` when `DX * DX + DY * DY < R * R + R`, so a shape of radius `R` is
 `2 * R + 1` pixels across and a circle of radius 1 is a 5 pixel plus. An ellipse applies the same
@@ -201,6 +202,30 @@ Draws a filled ellipse centered on the given point.
   Color % RGB fill color
 }
 ```
+
+## arc
+
+Draws a ring segment (or, with a large thickness, a pie slice).
+
+```erlang
+{arc,
+  CX, CY, % center in pixels
+  R, % outer radius in pixels, > 0
+  Thickness, % ring thickness in pixels, > 0, Thickness >= R draws a pie slice
+  StartDeg, EndDeg, % integer degrees, 0 is 3 o'clock, drawn clockwise from StartDeg to EndDeg
+  Color % RGB color
+}
+```
+
+The arc sweeps `(EndDeg - StartDeg) mod 360` degrees clockwise, so `{0, 90}` is a quarter,
+`{0, -90}` three quarters and `{0, 400}` 40 degrees. Different angles that are equal mod 360, such
+as `{0, 360}` or `{0, -720}`, draw a full ring. `StartDeg == EndDeg` is invalid.
+
+A pixel is drawn when its center is inside the ring (by the midpoint rule, for both the outer
+radius `R` and the inner radius `R - Thickness`) and either its center lies within the sweep, both
+edges included, or one of the two edge rays from the center passes through the pixel. The rays keep
+narrow arcs visible: a 1 degree arc still draws the ring pixels its edges cross. Because both edges
+are included, two arcs that share an edge angle both draw the pixels on it.
 
 ## Image Tuples
 
