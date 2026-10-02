@@ -235,7 +235,8 @@ typedef enum
     ShapeCmdLine,
     ShapeCmdCircle,
     ShapeCmdEllipse,
-    ShapeCmdArc
+    ShapeCmdArc,
+    ShapeCmdPolygon
 } shape_cmd_t;
 
 static shape_cmd_t get_shape_cmd(term cmd, Context *ctx)
@@ -250,8 +251,33 @@ static shape_cmd_t get_shape_cmd(term cmd, Context *ctx)
         return ShapeCmdEllipse;
     } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x3", "arc"))) {
         return ShapeCmdArc;
+    } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x7", "polygon"))) {
+        return ShapeCmdPolygon;
     }
     return ShapeCmdNone;
+}
+
+static struct ShapeData *new_polygon(term list)
+{
+    int proper;
+    int len = term_list_length(list, &proper);
+    if (!proper || len < 3 || len > SHAPE_POLYGON_MAX_POINTS) {
+        return NULL;
+    }
+    struct ShapePoint *points = malloc(sizeof(struct ShapePoint) * len);
+    if (points == NULL) {
+        return NULL;
+    }
+    for (int i = 0; i < len; i++) {
+        term pt = term_get_list_head(list);
+        if (!term_is_tuple(pt) || term_get_tuple_arity(pt) != 2
+            || !get_shape_value_element(pt, 0, &points[i].x) || !get_shape_value_element(pt, 1, &points[i].y)) {
+            free(points);
+            return NULL;
+        }
+        list = term_get_list_tail(list);
+    }
+    return shape_new_polygon_owned(points, len);
 }
 
 static const char *init_shape_item(BaseDisplayItem *item, term req, Context *ctx, shape_cmd_t cmd)
@@ -305,6 +331,11 @@ static const char *init_shape_item(BaseDisplayItem *item, term req, Context *ctx
                 shape = shape_new_arc(a, b, c, d, start_deg, end_deg);
                 ok = shape != NULL;
             }
+            break;
+
+        case ShapeCmdPolygon:
+            ok = arity == 3 && get_color_element(req, 2, &color)
+                && (shape = new_polygon(term_get_tuple_element(req, 1))) != NULL;
             break;
 
         default:

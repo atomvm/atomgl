@@ -26,13 +26,22 @@
 
 #define SHAPE_VALUE_LIMIT 32767
 
+#define SHAPE_POLYGON_MAX_POINTS 256
+
 typedef enum
 {
     ShapeKindRoundedRect,
     ShapeKindLine,
     ShapeKindEllipse,
-    ShapeKindArc
+    ShapeKindArc,
+    ShapeKindPolygon
 } shape_kind_t;
+
+struct ShapePoint
+{
+    int x;
+    int y;
+};
 
 struct ShapeData;
 
@@ -41,6 +50,8 @@ struct ShapeData *shape_new_line(int x1, int y1, int x2, int y2, int thickness);
 struct ShapeData *shape_new_ellipse(int cx, int cy, int rx, int ry);
 struct ShapeData *shape_new_arc(int cx, int cy, int radius, int thickness, int start_deg,
     int end_deg);
+struct ShapeData *shape_new_polygon(const struct ShapePoint *points, int points_len);
+struct ShapeData *shape_new_polygon_owned(struct ShapePoint *points, int points_len);
 void shape_destroy(struct ShapeData *shape);
 
 shape_kind_t shape_kind(const struct ShapeData *shape);
