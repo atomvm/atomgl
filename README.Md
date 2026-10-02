@@ -196,7 +196,7 @@ AtomGL supports the following primitive types:
 * **scaled_cropped_image** - Display scaled and cropped images
 * **rect** - Draw filled rectangles
 * **text** - Render text with specified font
-* **rounded_rect**, **circle** - Draw filled shapes
+* **rounded_rect**, **circle**, **ellipse** - Draw filled shapes
 
 Example display list with multiple primitives:
 

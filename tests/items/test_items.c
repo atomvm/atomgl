@@ -362,6 +362,9 @@ static void test_shape_invalid(void)
     expect_invalid("not a tuple", term_from_int(3));
     expect_invalid("empty tuple", tuple(0));
     expect_invalid("unknown command", tuple(2, atom("triangle"), term_from_int(1)));
+    expect_invalid("circle with ellipse arity",
+        tuple(6, atom("circle"), term_from_int(10), term_from_int(10), term_from_int(5), term_from_int(5), c));
+    expect_invalid("ellipse with circle arity", tuple(5, atom("ellipse"), term_from_int(10), term_from_int(10), term_from_int(5), c));
     expect_invalid("circle radius above limit",
         tuple(5, atom("circle"), term_from_int(10), term_from_int(10), term_from_int(SHAPE_VALUE_LIMIT + 1), c));
     expect_invalid("rounded_rect color not an integer",
@@ -483,6 +486,8 @@ static void test_shape_valid(void)
 
     check_shape("circle", tuple(5, atom("circle"), term_from_int(10), term_from_int(12), term_from_int(4), c), ShapeKindEllipse, 6, 8,
         9, 9, NULL);
+    check_shape("ellipse", tuple(6, atom("ellipse"), term_from_int(10), term_from_int(12), term_from_int(4), term_from_int(2), c),
+        ShapeKindEllipse, 6, 10, 9, 5, NULL);
     check_shape("rounded_rect",
         tuple(7, atom("rounded_rect"), term_from_int(1), term_from_int(2), term_from_int(30), term_from_int(20), term_from_int(5), c),
         ShapeKindRoundedRect, 1, 2, 30, 20, NULL);

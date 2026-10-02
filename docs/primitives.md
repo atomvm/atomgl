@@ -63,13 +63,14 @@ Text can be provided as either an Erlang string (a list) or an Elixir string (a 
 encoding is supported.
 
 ### Shapes
-Shape primitives (`rounded_rect`, `circle`) paint only the pixels inside the shape; pixels in the
-bounding box but outside the shape show whatever item is below in the display list.
+Shape primitives (`rounded_rect`, `circle`, `ellipse`) paint only the pixels inside the shape;
+pixels in the bounding box but outside the shape show whatever item is below in the display list.
 
-`circle` places its points on pixel centers: the pixel at `{X, Y}` is drawn when it is inside.
-Round edges use the midpoint rule: a pixel at offset `{DX, DY}` from the center is inside a radius
-`R` when `DX * DX + DY * DY < R * R + R`, so a shape of radius `R` is `2 * R + 1` pixels across and
-a circle of radius 1 is a 5 pixel plus.
+`circle` and `ellipse` place their points on pixel centers: the pixel at `{X, Y}` is
+drawn when it is inside. Round edges use the midpoint rule: a pixel at offset `{DX, DY}` from the
+center is inside a radius `R` when `DX * DX + DY * DY < R * R + R`, so a shape of radius `R` is
+`2 * R + 1` pixels across and a circle of radius 1 is a 5 pixel plus. An ellipse applies the same
+rule to each axis.
 
 ## image
 
@@ -160,6 +161,18 @@ Draws a filled circle centered on the given point.
 {circle,
   CX, CY, % center in pixels
   R, % radius in pixels, > 0, the circle is 2 * R + 1 pixels wide
+  Color % RGB fill color
+}
+```
+
+## ellipse
+
+Draws a filled ellipse centered on the given point.
+
+```erlang
+{ellipse,
+  CX, CY, % center in pixels
+  RX, RY, % horizontal and vertical radius in pixels, > 0
   Color % RGB fill color
 }
 ```

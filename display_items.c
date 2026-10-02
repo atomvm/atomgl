@@ -226,7 +226,8 @@ typedef enum
 {
     ShapeCmdNone,
     ShapeCmdRoundedRect,
-    ShapeCmdCircle
+    ShapeCmdCircle,
+    ShapeCmdEllipse
 } shape_cmd_t;
 
 static shape_cmd_t get_shape_cmd(term cmd, Context *ctx)
@@ -235,6 +236,8 @@ static shape_cmd_t get_shape_cmd(term cmd, Context *ctx)
         return ShapeCmdRoundedRect;
     } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x6", "circle"))) {
         return ShapeCmdCircle;
+    } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x7", "ellipse"))) {
+        return ShapeCmdEllipse;
     }
     return ShapeCmdNone;
 }
@@ -259,6 +262,13 @@ static const char *init_shape_item(BaseDisplayItem *item, term req, Context *ctx
             ok = arity == 5 && get_shape_value_element(req, 1, &a) && get_shape_value_element(req, 2, &b)
                 && get_shape_value_element(req, 3, &c) && get_color_element(req, 4, &color)
                 && (shape = shape_new_ellipse(a, b, c, c)) != NULL;
+            break;
+
+        case ShapeCmdEllipse:
+            ok = arity == 6 && get_shape_value_element(req, 1, &a) && get_shape_value_element(req, 2, &b)
+                && get_shape_value_element(req, 3, &c) && get_shape_value_element(req, 4, &d)
+                && get_color_element(req, 5, &color)
+                && (shape = shape_new_ellipse(a, b, c, d)) != NULL;
             break;
 
         default:
