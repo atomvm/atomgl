@@ -784,6 +784,126 @@ static void test_large_values(void)
     shape_destroy(s);
 }
 
+static void test_polygon_square_matches_rect(void)
+{
+    struct ShapePoint pts[] = { { 0, 0 }, { 4, 0 }, { 4, 4 }, { 0, 4 } };
+    struct ShapeData *s;
+    CHECK((s = shape_new_polygon(pts, 4)) != NULL);
+    CHECK_BOUNDS(s, 0, 0, 4, 4);
+    CHECK_RENDER(s,
+        "####\n"
+        "####\n"
+        "####\n"
+        "####\n");
+    shape_destroy(s);
+}
+
+static void test_polygon_concave(void)
+{
+    struct ShapePoint pts[] = { { 0, 0 }, { 4, 0 }, { 4, 2 }, { 2, 2 }, { 2, 4 }, { 0, 4 } };
+    struct ShapeData *s;
+    CHECK((s = shape_new_polygon(pts, 6)) != NULL);
+    CHECK_RENDER(s,
+        "####\n"
+        "####\n"
+        "##..\n"
+        "##..\n");
+    shape_destroy(s);
+}
+
+static void test_polygon_even_odd_hole(void)
+{
+    struct ShapePoint pts[] = {
+        { 0, 0 }, { 6, 0 }, { 6, 6 }, { 0, 6 }, { 0, 0 },
+        { 2, 2 }, { 2, 4 }, { 4, 4 }, { 4, 2 }, { 2, 2 }
+    };
+    struct ShapeData *s;
+    CHECK((s = shape_new_polygon(pts, 10)) != NULL);
+    CHECK(shape_contains(s, 1, 4));
+    CHECK(!shape_contains(s, 3, 3));
+    CHECK(shape_contains(s, 5, 3));
+    CHECK(shape_contains(s, 5, 5));
+    shape_destroy(s);
+}
+
+static void test_polygon_triangle_rows_out_of_order(void)
+{
+    struct ShapePoint pts[] = { { 0, 0 }, { 8, 0 }, { 0, 8 } };
+    struct ShapeData *s;
+    CHECK((s = shape_new_polygon(pts, 3)) != NULL);
+    CHECK(shape_contains(s, 0, 7));
+    CHECK(shape_contains(s, 6, 0));
+    CHECK(!shape_contains(s, 7, 7));
+    CHECK(shape_contains(s, 0, 7));
+    CHECK(!shape_contains(s, 1, 7));
+    shape_destroy(s);
+}
+
+static void test_polygon_copies_points(void)
+{
+    struct ShapePoint pts[] = { { 0, 0 }, { 4, 0 }, { 4, 4 }, { 0, 4 } };
+    struct ShapeData *s;
+    CHECK((s = shape_new_polygon(pts, 4)) != NULL);
+    pts[1].x = 100;
+    CHECK(!shape_contains(s, 50, 1));
+    CHECK(shape_contains(s, 3, 1));
+    shape_destroy(s);
+}
+
+static void test_polygon_invalid(void)
+{
+    struct ShapePoint pts[] = { { 0, 0 }, { 4, 0 } };
+    CHECK(shape_new_polygon(pts, 2) == NULL);
+    CHECK(shape_new_polygon(NULL, 0) == NULL);
+    CHECK(shape_polygon_begin(2) == NULL);
+}
+
+static void test_polygon_max_points(void)
+{
+    int n = SHAPE_POLYGON_MAX_POINTS + 1;
+    struct ShapePoint *pts = malloc(sizeof(struct ShapePoint) * n);
+    for (int i = 0; i < n; i++) {
+        pts[i].x = i % 2;
+        pts[i].y = i;
+    }
+    struct ShapeData *s;
+    CHECK(shape_new_polygon(pts, n) == NULL);
+    CHECK((s = shape_new_polygon(pts, n - 1)) != NULL);
+    shape_destroy(s);
+
+    CHECK(shape_polygon_begin(n) == NULL);
+    CHECK((s = shape_polygon_begin(4)) != NULL);
+    CHECK(shape_polygon_add_point(s, 0, 0));
+    CHECK(shape_polygon_add_point(s, 4, 0));
+    CHECK(shape_polygon_add_point(s, 4, 4));
+    CHECK(!shape_polygon_end(s));
+    CHECK(!shape_polygon_add_point(s, SHAPE_VALUE_LIMIT + 1, 4));
+    CHECK(shape_polygon_add_point(s, 0, 4));
+    CHECK(!shape_polygon_add_point(s, 0, 0));
+    CHECK(shape_polygon_end(s));
+    CHECK(shape_contains(s, 3, 3));
+    shape_destroy(s);
+    free(pts);
+}
+
+static void test_polygon_equal(void)
+{
+    struct ShapePoint p1[] = { { 0, 0 }, { 4, 0 }, { 0, 4 } };
+    struct ShapePoint p2[] = { { 0, 0 }, { 4, 0 }, { 0, 5 } };
+    struct ShapeData *a;
+    struct ShapeData *b;
+    struct ShapeData *c;
+    CHECK((a = shape_new_polygon(p1, 3)) != NULL);
+    CHECK((b = shape_new_polygon(p1, 3)) != NULL);
+    CHECK((c = shape_new_polygon(p2, 3)) != NULL);
+    shape_contains(a, 1, 1);
+    CHECK(shape_equal(a, b));
+    CHECK(!shape_equal(a, c));
+    shape_destroy(a);
+    shape_destroy(b);
+    shape_destroy(c);
+}
+
 static void check_runs(struct ShapeData *shape, int line)
 {
     int bx, by, bw, bh;
@@ -823,6 +943,50 @@ out:
 }
 
 #define CHECK_RUNS(shape) check_runs(shape, __LINE__)
+
+static long render_by_runs(struct ShapeData *s)
+{
+    int bx, by, bw, bh;
+    shape_bounds(s, &bx, &by, &bw, &bh);
+    long count = 0;
+    for (int y = by; y < by + bh; y++) {
+        for (int x = bx; x < bx + bw; x++) {
+            bool inside;
+            shape_run(s, x, y, &inside);
+            count += inside ? 1 : 0;
+        }
+    }
+    return count;
+}
+
+static void test_polygon_comb(void)
+{
+    int n = SHAPE_POLYGON_MAX_POINTS;
+    struct ShapePoint *pts = malloc(sizeof(struct ShapePoint) * n);
+    struct ShapeData *s;
+
+    for (int i = 0; i < n; i++) {
+        int tooth = i / 3;
+        pts[i].x = tooth;
+        pts[i].y = (i % 3 == 1) ? 240 : 0;
+    }
+    CHECK((s = shape_new_polygon(pts, n)) != NULL);
+    CHECK(render_by_runs(s) == 0);
+    CHECK_RUNS(s);
+    shape_destroy(s);
+
+    for (int t = 0; t < n / 4; t++) {
+        pts[4 * t + 0] = (struct ShapePoint){ 2 * t, 240 };
+        pts[4 * t + 1] = (struct ShapePoint){ 2 * t, 10 };
+        pts[4 * t + 2] = (struct ShapePoint){ 2 * t + 1, 10 };
+        pts[4 * t + 3] = (struct ShapePoint){ 2 * t + 1, 240 };
+    }
+    CHECK((s = shape_new_polygon(pts, n)) != NULL);
+    CHECK(render_by_runs(s) == (long) (n / 4) * 230);
+    CHECK_RUNS(s);
+    shape_destroy(s);
+    free(pts);
+}
 
 static void check_run_outside_bbox(struct ShapeData *s, int line)
 {
@@ -869,6 +1033,10 @@ static void test_run_outside_bbox(void)
     CHECK((s = shape_new_arc(-SHAPE_VALUE_LIMIT, SHAPE_VALUE_LIMIT, SHAPE_VALUE_LIMIT, 1, 0, 360)) != NULL);
     check_run_outside_bbox(s, __LINE__);
     shape_destroy(s);
+    struct ShapePoint pts[] = { { 0, 0 }, { 40, 10 }, { 10, 40 }, { 20, 15 } };
+    CHECK((s = shape_new_polygon(pts, 4)) != NULL);
+    check_run_outside_bbox(s, __LINE__);
+    shape_destroy(s);
 }
 
 static void test_runs_match_contains(void)
@@ -909,6 +1077,32 @@ static void test_runs_match_contains(void)
         CHECK_RUNS(s);
         shape_destroy(s);
     }
+
+    struct ShapePoint square[] = { { 0, 0 }, { 4, 0 }, { 4, 4 }, { 0, 4 } };
+    struct ShapePoint ell[] = { { 0, 0 }, { 4, 0 }, { 4, 2 }, { 2, 2 }, { 2, 4 }, { 0, 4 } };
+    struct ShapePoint hole[] = { { 0, 0 }, { 6, 0 }, { 6, 6 }, { 0, 6 }, { 0, 0 }, { 2, 2 },
+        { 2, 4 }, { 4, 4 }, { 4, 2 }, { 2, 2 } };
+    struct ShapePoint tri[] = { { 0, 0 }, { 8, 0 }, { 0, 8 } };
+    struct ShapePoint star[] = { { 10, 0 }, { 16, 19 }, { 0, 7 }, { 20, 7 }, { 4, 19 } };
+    struct ShapePoint neg[] = { { -9, -3 }, { 5, -8 }, { 2, 6 } };
+    CHECK((s = shape_new_polygon(square, 4)) != NULL);
+    CHECK_RUNS(s);
+    shape_destroy(s);
+    CHECK((s = shape_new_polygon(ell, 6)) != NULL);
+    CHECK_RUNS(s);
+    shape_destroy(s);
+    CHECK((s = shape_new_polygon(hole, 10)) != NULL);
+    CHECK_RUNS(s);
+    shape_destroy(s);
+    CHECK((s = shape_new_polygon(tri, 3)) != NULL);
+    CHECK_RUNS(s);
+    shape_destroy(s);
+    CHECK((s = shape_new_polygon(star, 5)) != NULL);
+    CHECK_RUNS(s);
+    shape_destroy(s);
+    CHECK((s = shape_new_polygon(neg, 3)) != NULL);
+    CHECK_RUNS(s);
+    shape_destroy(s);
 }
 
 static uint32_t rng_state = 12345;
@@ -932,6 +1126,28 @@ static void test_arc_runs_random(void)
         if (s == NULL) {
             continue;
         }
+        CHECK_RUNS(s);
+        shape_destroy(s);
+    }
+}
+
+static void test_polygon_runs_random(void)
+{
+    struct ShapePoint pts[40];
+    for (int i = 0; i < 400; i++) {
+        int n = rng_range(3, 40);
+        int span = rng_range(1, 30);
+        for (int j = 0; j < n; j++) {
+            if (j > 0 && rng_range(0, 5) == 0) {
+                pts[j] = pts[j - 1];
+                pts[j].x += rng_range(-1, 1) * rng_range(0, span);
+            } else {
+                pts[j].x = rng_range(-span, span);
+                pts[j].y = rng_range(-span, span);
+            }
+        }
+        struct ShapeData *s = shape_new_polygon(pts, n);
+        CHECK(s != NULL);
         CHECK_RUNS(s);
         shape_destroy(s);
     }
@@ -1255,6 +1471,30 @@ static void test_extreme_values(void)
     CHECK((s = shape_new_line(-lim, lim, lim - 3, -lim, 1)) != NULL);
     check_extreme(s, "line", __LINE__);
     shape_destroy(s);
+
+    struct ShapePoint square[] = { { -lim, -lim }, { lim, -lim }, { lim, lim }, { -lim, lim } };
+    struct ShapePoint bowtie[] = { { -lim, -lim }, { lim, lim }, { lim, -lim }, { -lim, lim } };
+    struct ShapePoint sliver[] = { { -lim, -lim }, { lim, lim - 1 }, { lim, lim } };
+    CHECK((s = shape_new_polygon(square, 4)) != NULL);
+    check_extreme(s, "polygon", __LINE__);
+    shape_destroy(s);
+    CHECK((s = shape_new_polygon(bowtie, 4)) != NULL);
+    check_extreme(s, "polygon", __LINE__);
+    shape_destroy(s);
+    CHECK((s = shape_new_polygon(sliver, 3)) != NULL);
+    check_extreme(s, "polygon", __LINE__);
+    shape_destroy(s);
+
+    int n = SHAPE_POLYGON_MAX_POINTS;
+    struct ShapePoint *comb = malloc(sizeof(struct ShapePoint) * n);
+    for (int i = 0; i < n; i++) {
+        comb[i].x = -lim + (int) ((int64_t) (i / 2) * 2 * lim / (n / 2));
+        comb[i].y = ((i + 1) % 4 < 2) ? -lim : lim;
+    }
+    CHECK((s = shape_new_polygon(comb, n)) != NULL);
+    check_extreme(s, "polygon", __LINE__);
+    shape_destroy(s);
+    free(comb);
 }
 
 static void test_out_of_range_rejected(void)
@@ -1284,6 +1524,15 @@ static void test_out_of_range_rejected(void)
     CHECK(shape_new_arc(0, under, 1, 1, 0, 90) == NULL);
     CHECK(shape_new_arc(0, 0, over, 1, 0, 90) == NULL);
     CHECK(shape_new_arc(0, 0, 1, over, 0, 90) == NULL);
+
+    struct ShapePoint pts[] = { { 0, 0 }, { over, 0 }, { 0, 4 } };
+    CHECK(shape_new_polygon(pts, 3) == NULL);
+    pts[1].x = 4;
+    pts[2].y = under;
+    CHECK(shape_new_polygon(pts, 3) == NULL);
+    pts[2].y = SHAPE_VALUE_LIMIT;
+    CHECK((s = shape_new_polygon(pts, 3)) != NULL);
+    shape_destroy(s);
 
     CHECK((s = shape_new_ellipse(SHAPE_VALUE_LIMIT, -SHAPE_VALUE_LIMIT, SHAPE_VALUE_LIMIT, 1)) != NULL);
     shape_destroy(s);
@@ -1336,9 +1585,19 @@ int main(void)
     test_arc_tiny_sweep_visible();
     test_arc_invalid();
     test_large_values();
+    test_polygon_square_matches_rect();
+    test_polygon_concave();
+    test_polygon_even_odd_hole();
+    test_polygon_triangle_rows_out_of_order();
+    test_polygon_copies_points();
+    test_polygon_invalid();
+    test_polygon_max_points();
+    test_polygon_comb();
+    test_polygon_equal();
     test_runs_match_contains();
     test_run_outside_bbox();
     test_arc_runs_random();
+    test_polygon_runs_random();
     test_ellipse_runs_random();
     test_rounded_rect_runs_random();
     test_line_runs_random();

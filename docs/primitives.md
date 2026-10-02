@@ -25,8 +25,8 @@ specified in pixels, as are sizes. Subpixel or half-pixel values are not allowed
   without changing which pixels are drawn on screen, so `{rect, 0, 0, 100000, 100000, Color}`
   still fills the screen. A `rect` with a width or height of 0 or less draws nothing.
 - `image` and `scaled_cropped_image` coordinates, sizes, source offsets and scale factors, image
-  widths and heights, and every value of a shape (coordinates, sizes, radii and thicknesses) must
-  be within ±32767, or the item is invalid.
+  widths and heights, and every value of a shape (coordinates, sizes, radii, thicknesses and
+  polygon points) must be within ±32767, or the item is invalid.
 - Arc angles can be any integer.
 
 ### Invalid Items
@@ -64,15 +64,18 @@ Text can be provided as either an Erlang string (a list) or an Elixir string (a 
 encoding is supported.
 
 ### Shapes
-Shape primitives (`rounded_rect`, `line`, `circle`, `ellipse`, `arc`) paint only the pixels inside
-the shape; pixels in the bounding box but outside the shape show whatever item is below in the
-display list.
+Shape primitives (`rounded_rect`, `line`, `circle`, `ellipse`, `arc`, `polygon`) paint only the
+pixels inside the shape; pixels in the bounding box but outside the shape show whatever item is
+below in the display list.
 
 `line`, `circle`, `ellipse` and `arc` place their points on pixel centers: the pixel at `{X, Y}` is
 drawn when it is inside. Round edges use the midpoint rule: a pixel at offset `{DX, DY}` from the
 center is inside a radius `R` when `DX * DX + DY * DY < R * R + R`, so a shape of radius `R` is
 `2 * R + 1` pixels across and a circle of radius 1 is a 5 pixel plus. An ellipse applies the same
-rule to each axis.
+rule to each axis. `polygon` vertices lie on pixel corners instead (see below), so a polygon
+outlined with `line` items at the same coordinates is off by half a pixel: the lines along its top
+and left edges cover its first row and column, the lines along its right and bottom edges fall just
+outside it.
 
 ## image
 
@@ -226,6 +229,21 @@ radius `R` and the inner radius `R - Thickness`) and either its center lies with
 edges included, or one of the two edge rays from the center passes through the pixel. The rays keep
 narrow arcs visible: a 1 degree arc still draws the ring pixels its edges cross. Because both edges
 are included, two arcs that share an edge angle both draw the pixels on it.
+
+## polygon
+
+Draws a filled polygon from a list of vertices, using the even-odd fill rule. Vertices lie on
+pixel corners: the pixel at `{X, Y}` spans `X..X+1` and `Y..Y+1` and is drawn when its center is
+inside, so `[{0, 0}, {10, 0}, {10, 10}, {0, 10}]` fills exactly 10 by 10 pixels, columns and rows 0
+to 9. Unlike the other shapes, which include their edges, a polygon's fill is half-open: polygons
+that share an edge don't overlap and leave no gap between them.
+
+```erlang
+{polygon,
+  Points, % list of 3 to 64 {X, Y} vertices on pixel corners, even-odd fill
+  Color % RGB fill color
+}
+```
 
 ## Image Tuples
 

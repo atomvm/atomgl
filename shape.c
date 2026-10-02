@@ -105,6 +105,36 @@ struct ShapeArc
     bool seg_inside[ARC_MAX_BREAKPOINTS];
 };
 
+struct PolygonEdge
+{
+    int ytop;
+    int ybot;
+    int xtop;
+    int dx;
+    int col;
+    int rem;
+    int step_col;
+    int step_rem;
+};
+
+struct ShapePolygon
+{
+    struct ShapeData base;
+    int points_len;
+    int points_added;
+    struct ShapePoint first;
+    struct ShapePoint last;
+    int edges_len;
+    int cache_row;
+    int next_edge;
+    int active_len;
+    uint16_t *active;
+    int toggles_len;
+    int *toggles;
+    int last_upto;
+    struct PolygonEdge edges[];
+};
+
 static void *shape_alloc(size_t size, shape_kind_t kind)
 {
     struct ShapeData *shape = malloc(size);
@@ -359,6 +389,247 @@ static inline bool in_bbox(const struct ShapeData *b, int x, int y)
     return x >= b->x && x < b->x + b->w && y >= b->y && y < b->y + b->h;
 }
 
+static int64_t polygon_edge_num(const struct PolygonEdge *e, int y)
+{
+    int64_t dy = (int64_t) e->ybot - e->ytop;
+    return (2 * (int64_t) e->xtop - 1) * dy + (int64_t) e->dx * (2 * ((int64_t) y - e->ytop) + 1);
+}
+
+static void polygon_edge_start(struct PolygonEdge *e, int y)
+{
+    int64_t den = 2 * ((int64_t) e->ybot - e->ytop);
+    int64_t num = polygon_edge_num(e, y);
+    int64_t q = floor_div(num, den);
+    e->col = (int) (q + 1);
+    e->rem = (int) (num - q * den);
+}
+
+static void polygon_edge_step(struct PolygonEdge *e)
+{
+    int den = 2 * (e->ybot - e->ytop);
+    e->col += e->step_col;
+    e->rem += e->step_rem;
+    if (e->rem >= den) {
+        e->rem -= den;
+        e->col++;
+    }
+}
+
+static void polygon_update_row(struct ShapePolygon *poly, int y)
+{
+    struct PolygonEdge *edges = poly->edges;
+    uint16_t *active = poly->active;
+    int n = 0;
+    if (poly->cache_row != INT_MIN && y == poly->cache_row + 1) {
+        for (int i = 0; i < poly->active_len; i++) {
+            struct PolygonEdge *e = &edges[active[i]];
+            if (e->ybot > y) {
+                polygon_edge_step(e);
+                active[n++] = active[i];
+            }
+        }
+    } else {
+        poly->next_edge = 0;
+    }
+    while (poly->next_edge < poly->edges_len && edges[poly->next_edge].ytop <= y) {
+        struct PolygonEdge *e = &edges[poly->next_edge];
+        if (e->ybot > y) {
+            polygon_edge_start(e, y);
+            active[n++] = (uint16_t) poly->next_edge;
+        }
+        poly->next_edge++;
+    }
+    poly->active_len = n;
+
+    for (int i = 1; i < n; i++) {
+        uint16_t edge = active[i];
+        int col = edges[edge].col;
+        int j = i;
+        while (j > 0 && edges[active[j - 1]].col > col) {
+            active[j] = active[j - 1];
+            j--;
+        }
+        active[j] = edge;
+    }
+
+    int out = 0;
+    int i = 0;
+    while (i < n) {
+        int col = edges[active[i]].col;
+        int j = i + 1;
+        while (j < n && edges[active[j]].col == col) {
+            j++;
+        }
+        if (((j - i) & 1) != 0) {
+            poly->toggles[out++] = col;
+        }
+        i = j;
+    }
+    poly->toggles_len = out;
+    poly->cache_row = y;
+}
+
+static inline bool polygon_toggles_upto_is(const struct ShapePolygon *poly, int i, int x)
+{
+    return (i == 0 || poly->toggles[i - 1] <= x) && (i == poly->toggles_len || poly->toggles[i] > x);
+}
+
+static int polygon_toggles_upto(struct ShapePolygon *poly, int x, int y)
+{
+    if (poly->cache_row != y) {
+        polygon_update_row(poly, y);
+        poly->last_upto = 0;
+    }
+    int last = poly->last_upto;
+    if (polygon_toggles_upto_is(poly, last, x)) {
+        return last;
+    }
+    if (last < poly->toggles_len && polygon_toggles_upto_is(poly, last + 1, x)) {
+        poly->last_upto = last + 1;
+        return last + 1;
+    }
+    int lo = 0;
+    int hi = poly->toggles_len;
+    while (lo < hi) {
+        int mid = lo + (hi - lo) / 2;
+        if (poly->toggles[mid] <= x) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    poly->last_upto = lo;
+    return lo;
+}
+
+static bool polygon_contains(const struct ShapePolygon *poly, int x, int y)
+{
+    if (!in_bbox(&poly->base, x, y)) {
+        return false;
+    }
+    bool inside = false;
+    for (int i = 0; i < poly->edges_len; i++) {
+        const struct PolygonEdge *e = &poly->edges[i];
+        if (e->ytop <= y && y < e->ybot
+            && polygon_edge_num(e, y) < 2 * (int64_t) x * ((int64_t) e->ybot - e->ytop)) {
+            inside = !inside;
+        }
+    }
+    return inside;
+}
+
+static int polygon_edge_cmp(const void *a, const void *b)
+{
+    const struct PolygonEdge *ea = a;
+    const struct PolygonEdge *eb = b;
+    if (ea->ytop != eb->ytop) {
+        return (ea->ytop > eb->ytop) - (ea->ytop < eb->ytop);
+    }
+    if (ea->ybot != eb->ybot) {
+        return (ea->ybot > eb->ybot) - (ea->ybot < eb->ybot);
+    }
+    if (ea->xtop != eb->xtop) {
+        return (ea->xtop > eb->xtop) - (ea->xtop < eb->xtop);
+    }
+    return (ea->dx > eb->dx) - (ea->dx < eb->dx);
+}
+
+struct ShapeData *shape_polygon_begin(int points_len)
+{
+    if (points_len < 3 || points_len > SHAPE_POLYGON_MAX_POINTS) {
+        return NULL;
+    }
+    _Static_assert(SHAPE_POLYGON_MAX_POINTS <= UINT16_MAX + 1, "edge indexes must fit uint16_t");
+    size_t size = sizeof(struct ShapePolygon) + sizeof(struct PolygonEdge) * points_len
+        + sizeof(int) * points_len + sizeof(uint16_t) * points_len;
+    struct ShapePolygon *poly = shape_alloc(size, ShapeKindPolygon);
+    if (poly == NULL) {
+        return NULL;
+    }
+    poly->points_len = points_len;
+    poly->toggles = (int *) (poly->edges + points_len);
+    poly->active = (uint16_t *) (poly->toggles + points_len);
+    poly->cache_row = INT_MIN;
+    return &poly->base;
+}
+
+static void polygon_add_edge(struct ShapePolygon *poly, const struct ShapePoint *a,
+    const struct ShapePoint *b)
+{
+    if (a->y == b->y) {
+        return;
+    }
+    if (a->y > b->y) {
+        const struct ShapePoint *t = a;
+        a = b;
+        b = t;
+    }
+    struct PolygonEdge *e = &poly->edges[poly->edges_len++];
+    e->ytop = a->y;
+    e->ybot = b->y;
+    e->xtop = a->x;
+    e->dx = b->x - a->x;
+    int den = 2 * (e->ybot - e->ytop);
+    e->step_col = (int) floor_div(2 * (int64_t) e->dx, den);
+    e->step_rem = 2 * e->dx - e->step_col * den;
+}
+
+bool shape_polygon_add_point(struct ShapeData *shape, int x, int y)
+{
+    struct ShapePolygon *poly = (struct ShapePolygon *) shape;
+    if (!in_limit(x) || !in_limit(y) || poly->points_added == poly->points_len) {
+        return false;
+    }
+    struct ShapePoint p = { x, y };
+    struct ShapeData *b = &poly->base;
+    if (poly->points_added == 0) {
+        poly->first = p;
+        b->x = x;
+        b->y = y;
+    } else {
+        polygon_add_edge(poly, &poly->last, &p);
+        int max_x = int_max(b->x + b->w, x);
+        int max_y = int_max(b->y + b->h, y);
+        b->x = int_min(b->x, x);
+        b->y = int_min(b->y, y);
+        b->w = max_x - b->x;
+        b->h = max_y - b->y;
+    }
+    poly->last = p;
+    poly->points_added++;
+    return true;
+}
+
+bool shape_polygon_end(struct ShapeData *shape)
+{
+    struct ShapePolygon *poly = (struct ShapePolygon *) shape;
+    if (poly->points_added != poly->points_len) {
+        return false;
+    }
+    polygon_add_edge(poly, &poly->last, &poly->first);
+    qsort(poly->edges, poly->edges_len, sizeof(struct PolygonEdge), polygon_edge_cmp);
+    return true;
+}
+
+struct ShapeData *shape_new_polygon(const struct ShapePoint *points, int points_len)
+{
+    if (points == NULL) {
+        return NULL;
+    }
+    struct ShapeData *shape = shape_polygon_begin(points_len);
+    if (shape == NULL) {
+        return NULL;
+    }
+    for (int i = 0; i < points_len; i++) {
+        if (!shape_polygon_add_point(shape, points[i].x, points[i].y)) {
+            shape_destroy(shape);
+            return NULL;
+        }
+    }
+    shape_polygon_end(shape);
+    return shape;
+}
+
 static bool rounded_rect_contains(const struct ShapeRoundedRect *rr, int x, int y)
 {
     const struct ShapeData *b = &rr->convex.base;
@@ -521,6 +792,8 @@ bool shape_contains(const struct ShapeData *shape, int x, int y)
             return ellipse_contains((const struct ShapeEllipse *) shape, x, y);
         case ShapeKindArc:
             return arc_contains((const struct ShapeArc *) shape, x, y);
+        case ShapeKindPolygon:
+            return polygon_contains((const struct ShapePolygon *) shape, x, y);
         default:
             return false;
     }
@@ -820,6 +1093,16 @@ static int arc_run(struct ShapeArc *arc, int x, int y, bool *inside)
     return arc->seg_start[i + 1] - x;
 }
 
+static int polygon_run(struct ShapePolygon *poly, int x, int y, int end, bool *inside)
+{
+    int i = polygon_toggles_upto(poly, x, y);
+    *inside = (i & 1) != 0;
+    if (i < poly->toggles_len && poly->toggles[i] < end) {
+        return poly->toggles[i] - x;
+    }
+    return end - x;
+}
+
 int shape_run(struct ShapeData *shape, int x, int y, bool *inside)
 {
     int bx = shape->x;
@@ -841,6 +1124,8 @@ int shape_run(struct ShapeData *shape, int x, int y, bool *inside)
             return convex_run((struct ShapeConvex *) shape, x, y, end, inside);
         case ShapeKindArc:
             return arc_run((struct ShapeArc *) shape, x, y, inside);
+        case ShapeKindPolygon:
+            return polygon_run((struct ShapePolygon *) shape, x, y, end, inside);
         default:
             *inside = false;
             return 1;
@@ -892,6 +1177,19 @@ bool shape_equal(const struct ShapeData *a, const struct ShapeData *b)
                 && arc_a->sweep == arc_b->sweep && arc_a->start_vx == arc_b->start_vx
                 && arc_a->start_vy == arc_b->start_vy && arc_a->end_vx == arc_b->end_vx
                 && arc_a->end_vy == arc_b->end_vy;
+        }
+        case ShapeKindPolygon: {
+            const struct ShapePolygon *poly_a = (const struct ShapePolygon *) a;
+            const struct ShapePolygon *poly_b = (const struct ShapePolygon *) b;
+            if (poly_a->edges_len != poly_b->edges_len) {
+                return false;
+            }
+            for (int i = 0; i < poly_a->edges_len; i++) {
+                if (polygon_edge_cmp(&poly_a->edges[i], &poly_b->edges[i]) != 0) {
+                    return false;
+                }
+            }
+            return true;
         }
         default:
             return false;

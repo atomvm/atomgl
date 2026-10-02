@@ -382,6 +382,36 @@ static void test_shape_invalid(void)
         tuple(8, atom("arc"), term_from_int(20), term_from_int(20), term_from_int(10), term_from_int(SHAPE_VALUE_LIMIT + 1),
             term_from_int(0), term_from_int(90), c));
 
+    term pts = list(3, tuple(2, term_from_int(0), term_from_int(0)), tuple(2, term_from_int(9), term_from_int(0)),
+        tuple(2, term_from_int(0), term_from_int(9)));
+    expect_invalid("polygon with 2 points",
+        tuple(3, atom("polygon"), list(2, tuple(2, term_from_int(0), term_from_int(0)), tuple(2, term_from_int(9), term_from_int(0))), c));
+    expect_invalid("polygon improper list",
+        tuple(3, atom("polygon"),
+            cons(tuple(2, term_from_int(0), term_from_int(0)),
+                cons(tuple(2, term_from_int(9), term_from_int(0)), cons(tuple(2, term_from_int(0), term_from_int(9)), term_from_int(1)))),
+            c));
+    expect_invalid("polygon point not a tuple",
+        tuple(3, atom("polygon"), list(3, tuple(2, term_from_int(0), term_from_int(0)), term_from_int(9), tuple(2, term_from_int(0), term_from_int(9))), c));
+    expect_invalid("polygon point arity 3",
+        tuple(3, atom("polygon"),
+            list(3, tuple(2, term_from_int(0), term_from_int(0)), tuple(3, term_from_int(9), term_from_int(0), term_from_int(0)),
+                tuple(2, term_from_int(0), term_from_int(9))),
+            c));
+    expect_invalid("polygon point above limit",
+        tuple(3, atom("polygon"),
+            list(3, tuple(2, term_from_int(0), term_from_int(0)), tuple(2, term_from_int(SHAPE_VALUE_LIMIT + 1), term_from_int(0)),
+                tuple(2, term_from_int(0), term_from_int(9))),
+            c));
+    expect_invalid("polygon not a list", tuple(3, atom("polygon"), term_from_int(4), c));
+    expect_invalid("polygon arity 4", tuple(4, atom("polygon"), pts, c, term_from_int(0)));
+
+    term many = term_nil();
+    for (int i = 0; i < SHAPE_POLYGON_MAX_POINTS + 1; i++) {
+        many = cons(tuple(2, term_from_int(i % 2 ? 40 : 0), term_from_int(i % 40)), many);
+    }
+    expect_invalid("polygon above the point cap", tuple(3, atom("polygon"), many, c));
+
     if (big_ints()) {
         avm_int_t wrap = ((avm_int_t) 1 << 32) + 5;
         expect_invalid("rounded_rect width 2^32 + 5",
@@ -392,6 +422,11 @@ static void test_shape_invalid(void)
             tuple(5, atom("circle"), term_from_int(wrap), term_from_int(10), term_from_int(3), c));
         expect_invalid("line thickness 2^32 + 1",
             tuple(7, atom("line"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(wrap - 4), c));
+        expect_invalid("polygon point 2^32 + 5",
+            tuple(3, atom("polygon"),
+                list(3, tuple(2, term_from_int(0), term_from_int(0)), tuple(2, term_from_int(wrap), term_from_int(0)),
+                    tuple(2, term_from_int(0), term_from_int(9))),
+                c));
         avm_int_t huge = (avm_int_t) 1 << 40;
         expect_invalid("arc equal huge angles",
             tuple(8, atom("arc"), term_from_int(20), term_from_int(20), term_from_int(10), term_from_int(3), term_from_int(huge),
@@ -530,6 +565,27 @@ static void test_shape_valid(void)
     check_shape("circle at the value limit",
         tuple(5, atom("circle"), term_from_int(-SHAPE_VALUE_LIMIT), term_from_int(SHAPE_VALUE_LIMIT), term_from_int(SHAPE_VALUE_LIMIT), c),
         ShapeKindEllipse, -2 * SHAPE_VALUE_LIMIT, 0, 2 * SHAPE_VALUE_LIMIT + 1, 2 * SHAPE_VALUE_LIMIT + 1, NULL);
+    check_shape("polygon",
+        tuple(3, atom("polygon"),
+            list(3, tuple(2, term_from_int(2), term_from_int(3)), tuple(2, term_from_int(30), term_from_int(3)),
+                tuple(2, term_from_int(2), term_from_int(25))),
+            c),
+        ShapeKindPolygon, 2, 3, 28, 22, NULL);
+
+    term many = term_nil();
+    struct ShapePoint many_points[SHAPE_POLYGON_MAX_POINTS];
+    for (int i = 0; i < SHAPE_POLYGON_MAX_POINTS; i++) {
+        many = cons(tuple(2, term_from_int(i % 2 ? 40 : 0), term_from_int(i / 2)), many);
+        many_points[SHAPE_POLYGON_MAX_POINTS - 1 - i] = (struct ShapePoint){ i % 2 ? 40 : 0, i / 2 };
+    }
+    BaseDisplayItem comb;
+    check_shape("polygon at the point cap", tuple(3, atom("polygon"), many, c), ShapeKindPolygon, 0, 0, 40, SHAPE_POLYGON_MAX_POINTS / 2 - 1, &comb);
+    if (comb.primitive == PrimitiveShape) {
+        struct ShapeData *ref = shape_new_polygon(many_points, SHAPE_POLYGON_MAX_POINTS);
+        CHECK(ref != NULL && shape_equal(comb.data.shape_data.shape, ref), "polygon cap: points differ");
+        shape_destroy(ref);
+        delete_item(&comb);
+    }
 
     check_arc_sweep(0, 90, 90);
     check_arc_sweep(0, -90, 270);
@@ -765,6 +821,12 @@ static void test_alloc_failures(void)
     expect_invalid_on_alloc_failure("rounded_rect",
         tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(2), c), 1);
     expect_invalid_on_alloc_failure("circle", tuple(5, atom("circle"), term_from_int(10), term_from_int(10), term_from_int(4), c), 1);
+    expect_invalid_on_alloc_failure("polygon",
+        tuple(3, atom("polygon"),
+            list(3, tuple(2, term_from_int(0), term_from_int(0)), tuple(2, term_from_int(9), term_from_int(0)),
+                tuple(2, term_from_int(0), term_from_int(9))),
+            c),
+        1);
 }
 
 static term *heap_mark(void)
@@ -978,6 +1040,22 @@ static void test_shape_reasons(void)
     expect_reason("arc equal angles",
         tuple(8, atom("arc"), term_from_int(20), term_from_int(20), term_from_int(10), term_from_int(3), term_from_int(45), term_from_int(45), c),
         "invalid display list item (arc/8): bad center, radius, thickness, angles or color\n");
+    expect_reason("polygon two points", tuple(3, atom("polygon"), list(2, tuple(2, term_from_int(0), term_from_int(0)), tuple(2, term_from_int(4), term_from_int(0))), c),
+        "invalid display list item (polygon/3): bad points or color\n");
+    expect_reason("polygon point not a pair", tuple(3, atom("polygon"), list(3, tuple(2, term_from_int(0), term_from_int(0)), tuple(2, term_from_int(4), term_from_int(0)), term_from_int(4)), c),
+        "invalid display list item (polygon/3): bad points or color\n");
+    term too_many = term_nil();
+    for (int i = 0; i < SHAPE_POLYGON_MAX_POINTS + 1; i++) {
+        too_many = cons(tuple(2, term_from_int(i % 2), term_from_int(i)), too_many);
+    }
+    expect_reason("polygon above the point cap", tuple(3, atom("polygon"), too_many, c),
+        "invalid display list item (polygon/3): too many points\n");
+    expect_reason_on_alloc_failure("polygon",
+        tuple(3, atom("polygon"),
+            list(3, tuple(2, term_from_int(0), term_from_int(0)), tuple(2, term_from_int(9), term_from_int(0)),
+                tuple(2, term_from_int(0), term_from_int(9))),
+            c),
+        "invalid display list item (polygon/3): out of memory\n");
     heap_release(mark);
 }
 

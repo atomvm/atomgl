@@ -334,6 +334,48 @@ static const char *init_arc_item(BaseDisplayItem *item, term req)
     return init_shape_item(item, shape_new_arc(cx, cy, radius, thickness, start_deg, end_deg), color);
 }
 
+static const char *init_polygon_item(BaseDisplayItem *item, term req)
+{
+    uint32_t color;
+    if (UNLIKELY(term_get_tuple_arity(req) != 3)) {
+        return "wrong arity";
+    }
+    term points = term_get_tuple_element(req, 1);
+    int proper;
+    int points_len = term_list_length(points, &proper);
+    if (UNLIKELY(!proper || points_len < 3 || !get_color_element(req, 2, &color))) {
+        return "bad points or color";
+    }
+    if (UNLIKELY(points_len > SHAPE_POLYGON_MAX_POINTS)) {
+        return "too many points";
+    }
+
+    struct ShapeData *shape = shape_polygon_begin(points_len);
+    if (IS_NULL_PTR(shape)) {
+        return "out of memory";
+    }
+    for (int i = 0; i < points_len; i++) {
+        term point = term_get_list_head(points);
+        int x, y;
+        if (UNLIKELY(!term_is_tuple(point) || term_get_tuple_arity(point) != 2
+                || !get_shape_value_element(point, 0, &x) || !get_shape_value_element(point, 1, &y))) {
+            shape_destroy(shape);
+            return "bad points or color";
+        }
+        if (UNLIKELY(!shape_polygon_add_point(shape, x, y))) {
+            shape_destroy(shape);
+            return "bad points or color";
+        }
+        points = term_get_list_tail(points);
+    }
+    if (UNLIKELY(!shape_polygon_end(shape))) {
+        shape_destroy(shape);
+        return "bad points or color";
+    }
+
+    return init_shape_item(item, shape, color);
+}
+
 static int clamp_coord(avm_int64_t v)
 {
     if (v < -DISPLAY_ITEMS_COORD_LIMIT) {
@@ -534,6 +576,9 @@ static const char *init_item(BaseDisplayItem *item, term req, Context *ctx)
 
     } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x3", "arc"))) {
         reason = init_arc_item(item, req);
+
+    } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x7", "polygon"))) {
+        reason = init_polygon_item(item, req);
 
     } else {
         reason = "unknown command";
