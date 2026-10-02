@@ -72,6 +72,94 @@ static void check_bounds(struct ShapeData *shape, int x, int y, int w, int h, in
 
 #define CHECK_BOUNDS(shape, x, y, w, h) check_bounds(shape, x, y, w, h, __LINE__)
 
+static bool same_pixels(struct ShapeData *a, struct ShapeData *b)
+{
+    int ax, ay, aw, ah;
+    int bx, by, bw, bh;
+    shape_bounds(a, &ax, &ay, &aw, &ah);
+    shape_bounds(b, &bx, &by, &bw, &bh);
+    int x0 = ax < bx ? ax : bx;
+    int y0 = ay < by ? ay : by;
+    int x1 = ax + aw > bx + bw ? ax + aw : bx + bw;
+    int y1 = ay + ah > by + bh ? ay + ah : by + bh;
+    for (int y = y0 - 1; y <= y1; y++) {
+        for (int x = x0 - 1; x <= x1; x++) {
+            if (shape_contains(a, x, y) != shape_contains(b, x, y)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static void test_circle_r2(void)
+{
+    struct ShapeData *s;
+    CHECK((s = shape_new_ellipse(10, 20, 2, 2)) != NULL);
+    CHECK_BOUNDS(s, 8, 18, 5, 5);
+    CHECK_RENDER(s,
+        ".###.\n"
+        "#####\n"
+        "#####\n"
+        "#####\n"
+        ".###.\n");
+    shape_destroy(s);
+}
+
+static void test_circle_small(void)
+{
+    struct ShapeData *s;
+    CHECK((s = shape_new_ellipse(0, 0, 1, 1)) != NULL);
+    CHECK_BOUNDS(s, -1, -1, 3, 3);
+    CHECK_RENDER(s,
+        ".#.\n"
+        "###\n"
+        ".#.\n");
+    shape_destroy(s);
+
+    CHECK((s = shape_new_ellipse(0, 0, 3, 3)) != NULL);
+    CHECK_RENDER(s,
+        "..###..\n"
+        ".#####.\n"
+        "#######\n"
+        "#######\n"
+        "#######\n"
+        ".#####.\n"
+        "..###..\n");
+    shape_destroy(s);
+
+    CHECK((s = shape_new_ellipse(0, 0, 3, 1)) != NULL);
+    CHECK_RENDER(s,
+        ".#####.\n"
+        "#######\n"
+        ".#####.\n");
+    shape_destroy(s);
+}
+
+static void test_ellipse_symmetry(void)
+{
+    struct ShapeData *s;
+    CHECK((s = shape_new_ellipse(0, 0, 9, 4)) != NULL);
+    CHECK_BOUNDS(s, -9, -4, 19, 9);
+    for (int y = -4; y <= 4; y++) {
+        for (int x = -9; x <= 9; x++) {
+            CHECK(shape_contains(s, x, y) == shape_contains(s, -x, y));
+            CHECK(shape_contains(s, x, y) == shape_contains(s, x, -y));
+        }
+    }
+    CHECK(shape_contains(s, 9, 0));
+    CHECK(shape_contains(s, 0, 4));
+    CHECK(!shape_contains(s, 10, 0));
+    CHECK(!shape_contains(s, 9, 4));
+    shape_destroy(s);
+}
+
+static void test_ellipse_invalid(void)
+{
+    CHECK(shape_new_ellipse(0, 0, 0, 5) == NULL);
+    CHECK(shape_new_ellipse(0, 0, 5, -1) == NULL);
+}
+
 static void test_rounded_rect(void)
 {
     struct ShapeData *s;
@@ -131,6 +219,23 @@ static void test_rounded_rect_small_radii(void)
     shape_destroy(s);
 }
 
+static void test_rounded_rect_matches_circle(void)
+{
+    for (int r = 1; r <= 20; r++) {
+        struct ShapeData *rr;
+        struct ShapeData *circle;
+        CHECK((rr = shape_new_rounded_rect(7 - r, -3 - r, 2 * r + 1, 2 * r + 1, r)) != NULL);
+        CHECK((circle = shape_new_ellipse(7, -3, r, r)) != NULL);
+        if (!same_pixels(rr, circle)) {
+            fprintf(stderr, "%s:%d: rounded_rect radius %d differs from circle\n", __FILE__,
+                __LINE__, r);
+            failures++;
+        }
+        shape_destroy(rr);
+        shape_destroy(circle);
+    }
+}
+
 static void test_rounded_rect_radius_zero_is_rect(void)
 {
     struct ShapeData *s;
@@ -165,12 +270,47 @@ static void test_rounded_rect_invalid(void)
 static void test_negative_coordinates(void)
 {
     struct ShapeData *s;
+    CHECK((s = shape_new_ellipse(-10, -10, 2, 2)) != NULL);
+    CHECK_RENDER(s,
+        ".###.\n"
+        "#####\n"
+        "#####\n"
+        "#####\n"
+        ".###.\n");
+    shape_destroy(s);
+
     CHECK((s = shape_new_rounded_rect(-3, -7, 6, 4, 2)) != NULL);
     CHECK_RENDER(s,
         ".####.\n"
         "######\n"
         "######\n"
         ".####.\n");
+    shape_destroy(s);
+}
+
+static void test_equal(void)
+{
+    struct ShapeData *a;
+    struct ShapeData *b;
+    CHECK((a = shape_new_ellipse(1, 2, 3, 4)) != NULL);
+    CHECK((b = shape_new_ellipse(1, 2, 3, 4)) != NULL);
+    CHECK(shape_equal(a, b));
+    shape_destroy(b);
+    CHECK((b = shape_new_ellipse(1, 2, 3, 5)) != NULL);
+    CHECK(!shape_equal(a, b));
+    shape_destroy(b);
+    CHECK((b = shape_new_rounded_rect(1, 2, 3, 4, 1)) != NULL);
+    CHECK(!shape_equal(a, b));
+    shape_destroy(a);
+    shape_destroy(b);
+}
+
+static void test_large_values(void)
+{
+    struct ShapeData *s;
+    CHECK((s = shape_new_ellipse(0, 0, 10000, 10000)) != NULL);
+    CHECK(shape_contains(s, 10000, 0));
+    CHECK(!shape_contains(s, 10000, 10000));
     shape_destroy(s);
 }
 
@@ -247,11 +387,22 @@ static void test_run_outside_bbox(void)
     CHECK((s = shape_new_rounded_rect(10, 20, 30, 40, 5)) != NULL);
     check_run_outside_bbox(s, __LINE__);
     shape_destroy(s);
+    CHECK((s = shape_new_ellipse(-5, 7, 9, 4)) != NULL);
+    check_run_outside_bbox(s, __LINE__);
+    shape_destroy(s);
 }
 
 static void test_runs_match_contains(void)
 {
     struct ShapeData *s;
+
+    int ellipses[][4] = { { 0, 0, 9, 4 }, { 3, -2, 1, 7 }, { 10, 20, 2, 2 }, { -7, 5, 1, 1 },
+        { 0, 0, 30, 30 } };
+    for (size_t i = 0; i < sizeof(ellipses) / sizeof(ellipses[0]); i++) {
+        CHECK((s = shape_new_ellipse(ellipses[i][0], ellipses[i][1], ellipses[i][2], ellipses[i][3])) != NULL);
+        CHECK_RUNS(s);
+        shape_destroy(s);
+    }
 
     int rects[][5] = { { 3, 4, 6, 4, 2 }, { 0, 0, 17, 9, 4 }, { -5, -5, 3, 20, 10 },
         { 0, 0, 1, 1, 0 }, { 2, 2, 40, 12, 6 } };
@@ -284,6 +435,17 @@ static bool is_symmetric(struct ShapeData *s)
         }
     }
     return true;
+}
+
+static void test_ellipse_runs_random(void)
+{
+    for (int i = 0; i < 300; i++) {
+        struct ShapeData *s;
+        CHECK((s = shape_new_ellipse(rng_range(-30, 30), rng_range(-30, 30), rng_range(1, 40), rng_range(1, 40))) != NULL);
+        CHECK_RUNS(s);
+        CHECK(is_symmetric(s));
+        shape_destroy(s);
+    }
 }
 
 static void test_rounded_rect_runs_random(void)
@@ -389,6 +551,10 @@ static void test_extreme_values(void)
             int cy = coords[j];
             for (int a = 0; a < nsizes; a++) {
                 for (int b = 0; b < nsizes; b++) {
+                    CHECK((s = shape_new_ellipse(cx, cy, sizes[a], sizes[b])) != NULL);
+                    check_extreme(s, "ellipse", __LINE__);
+                    shape_destroy(s);
+
                     CHECK((s = shape_new_rounded_rect(cx, cy, sizes[a], sizes[b], lim)) != NULL);
                     check_extreme(s, "rounded_rect", __LINE__);
                     shape_destroy(s);
@@ -403,24 +569,56 @@ static void test_out_of_range_rejected(void)
 {
     const int over = SHAPE_VALUE_LIMIT + 1;
     const int under = -SHAPE_VALUE_LIMIT - 1;
+    struct ShapeData *s;
+
+    CHECK(shape_new_ellipse(over, 0, 1, 1) == NULL);
+    CHECK(shape_new_ellipse(0, under, 1, 1) == NULL);
+    CHECK(shape_new_ellipse(0, 0, over, 1) == NULL);
+    CHECK(shape_new_ellipse(0, 0, 1, INT_MAX) == NULL);
+
     CHECK(shape_new_rounded_rect(under, 0, 1, 1, 0) == NULL);
     CHECK(shape_new_rounded_rect(0, over, 1, 1, 0) == NULL);
     CHECK(shape_new_rounded_rect(0, 0, over, 1, 0) == NULL);
     CHECK(shape_new_rounded_rect(0, 0, 1, over, 0) == NULL);
     CHECK(shape_new_rounded_rect(0, 0, 1, 1, over) == NULL);
+
+    CHECK((s = shape_new_ellipse(SHAPE_VALUE_LIMIT, -SHAPE_VALUE_LIMIT, SHAPE_VALUE_LIMIT, 1)) != NULL);
+    shape_destroy(s);
+}
+
+static void test_run_ellipse_values(void)
+{
+    struct ShapeData *s;
+    bool inside;
+    CHECK((s = shape_new_ellipse(10, 20, 2, 2)) != NULL);
+    CHECK(shape_run(s, 8, 18, &inside) == 1 && !inside);
+    CHECK(shape_run(s, 9, 18, &inside) == 3 && inside);
+    CHECK(shape_run(s, 10, 18, &inside) == 2 && inside);
+    CHECK(shape_run(s, 12, 18, &inside) == 1 && !inside);
+    CHECK(shape_run(s, 8, 20, &inside) == 5 && inside);
+    shape_destroy(s);
 }
 
 int main(void)
 {
+    test_circle_r2();
+    test_circle_small();
+    test_ellipse_symmetry();
+    test_ellipse_invalid();
     test_rounded_rect();
     test_rounded_rect_small_radii();
+    test_rounded_rect_matches_circle();
     test_rounded_rect_radius_zero_is_rect();
     test_rounded_rect_radius_clamped();
     test_rounded_rect_invalid();
     test_negative_coordinates();
+    test_equal();
+    test_large_values();
     test_runs_match_contains();
     test_run_outside_bbox();
+    test_ellipse_runs_random();
     test_rounded_rect_runs_random();
+    test_run_ellipse_values();
     test_out_of_range_rejected();
     test_extreme_values();
 
