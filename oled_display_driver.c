@@ -101,6 +101,12 @@ static void do_update(Context *ctx, term display_list)
     if (UNLIKELY(display_items_new_list(display_list, &items, &len, ctx) != DisplayItemsOk)) {
         return;
     }
+    BaseDisplayItem **row = malloc(sizeof(BaseDisplayItem *) * len);
+    if (UNLIKELY(len > 0 && !row)) {
+        fprintf(stderr, "do_update: failed to alloc row\n");
+        display_items_delete(items, len);
+        return;
+    }
 
     int screen_width = DISPLAY_WIDTH;
     int screen_height = DISPLAY_HEIGHT;
@@ -110,6 +116,7 @@ static void do_update(Context *ctx, term display_list)
     uint8_t *buf = malloc(memsize);
     if (UNLIKELY(!buf)) {
         fprintf(stderr, "do_update: failed to alloc buf\n");
+        free(row);
         display_items_delete(items, len);
         return;
     }
@@ -119,14 +126,16 @@ static void do_update(Context *ctx, term display_list)
     if (i2c_driver_acquire(driver->i2c_host, &i2c_num, ctx->global) != I2CAcquireOk) {
         fprintf(stderr, "Invalid I2C peripheral\n");
         free(buf);
+        free(row);
         display_items_delete(items, len);
         return;
     }
 
     for (int ypos = 0; ypos < screen_height; ypos++) {
+        size_t row_len = display_items_row(items, len, ypos, row);
         int xpos = 0;
         while (xpos < screen_width) {
-            int drawn_pixels = mono_draw_x(&driver->screen, buf, xpos, ypos, items, len);
+            int drawn_pixels = mono_draw_x(&driver->screen, buf, xpos, ypos, row, row_len);
             xpos += drawn_pixels;
         }
 
@@ -174,6 +183,7 @@ static void do_update(Context *ctx, term display_list)
     i2c_driver_release(driver->i2c_host, ctx->global);
 
     free(buf);
+    free(row);
     display_items_delete(items, len);
 }
 

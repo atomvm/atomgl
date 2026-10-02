@@ -187,6 +187,12 @@ static void do_update(Context *ctx, term display_list)
     if (UNLIKELY(display_items_new_list(display_list, &items, &len, ctx) != DisplayItemsOk)) {
         return;
     }
+    BaseDisplayItem **row = malloc(sizeof(BaseDisplayItem *) * len);
+    if (UNLIKELY(len > 0 && !row)) {
+        fprintf(stderr, "do_update: failed to alloc row\n");
+        display_items_delete(items, len);
+        return;
+    }
 
     struct EpaperDriver *driver = EPAPER_DRIVER_FROM_CTX(ctx);
     int screen_width = driver->screen.w;
@@ -200,6 +206,7 @@ static void do_update(Context *ctx, term display_list)
     uint8_t *buf = heap_caps_malloc(screen_width / 2, MALLOC_CAP_DMA);
     if (UNLIKELY(!buf)) {
         fprintf(stderr, "do_update: failed to alloc buf\n");
+        free(row);
         display_items_delete(items, len);
         return;
     }
@@ -215,9 +222,10 @@ static void do_update(Context *ctx, term display_list)
             spi_device_get_trans_result(driver->bus.spi_disp.handle, &trans, portMAX_DELAY);
         }
 
+        size_t row_len = display_items_row(items, len, ypos, row);
         int xpos = 0;
         while (xpos < screen_width) {
-            int drawn_pixels = epaper_draw_x(&driver->screen, buf, xpos, ypos, items, len);
+            int drawn_pixels = epaper_draw_x(&driver->screen, buf, xpos, ypos, row, row_len);
             xpos += drawn_pixels;
         }
 
@@ -236,6 +244,7 @@ static void do_update(Context *ctx, term display_list)
 
     send_post_frame_refresh(driver);
 
+    free(row);
     display_items_delete(items, len);
 
     update_last_refresh_ts(ctx);

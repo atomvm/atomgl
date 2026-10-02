@@ -274,16 +274,13 @@ int epaper_draw_scaled_cropped_img_x(const struct EpaperScreen *screen,
 
 int epaper_draw_x(const struct EpaperScreen *screen,
     uint8_t *line_buf, int xpos, int ypos,
-    BaseDisplayItem items[], size_t items_len)
+    BaseDisplayItem *items[], size_t items_len)
 {
     int line_len = screen->w - xpos;
     bool below = false;
 
     for (size_t i = 0; i < items_len; i++) {
-        BaseDisplayItem *item = &items[i];
-        if ((ypos < item->y) || (ypos >= item->y + item->height)) {
-            continue;
-        }
+        BaseDisplayItem *item = items[i];
         if (xpos < item->x) {
             int len_to_item = item->x - xpos;
             if (len_to_item < line_len) {
@@ -298,7 +295,7 @@ int epaper_draw_x(const struct EpaperScreen *screen,
         int max_line_len = below ? 1 : line_len;
 
         int drawn_pixels = 0;
-        switch (items[i].primitive) {
+        switch (item->primitive) {
             case PrimitiveImage:
                 drawn_pixels = epaper_draw_image_x(screen, line_buf, xpos, ypos, max_line_len, item);
                 break;
