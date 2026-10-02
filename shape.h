@@ -29,12 +29,14 @@
 typedef enum
 {
     ShapeKindRoundedRect,
+    ShapeKindLine,
     ShapeKindEllipse
 } shape_kind_t;
 
 struct ShapeData;
 
 struct ShapeData *shape_new_rounded_rect(int x, int y, int w, int h, int radius);
+struct ShapeData *shape_new_line(int x1, int y1, int x2, int y2, int thickness);
 struct ShapeData *shape_new_ellipse(int cx, int cy, int rx, int ry);
 void shape_destroy(struct ShapeData *shape);
 

@@ -226,6 +226,7 @@ typedef enum
 {
     ShapeCmdNone,
     ShapeCmdRoundedRect,
+    ShapeCmdLine,
     ShapeCmdCircle,
     ShapeCmdEllipse
 } shape_cmd_t;
@@ -234,6 +235,8 @@ static shape_cmd_t get_shape_cmd(term cmd, Context *ctx)
 {
     if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\xC", "rounded_rect"))) {
         return ShapeCmdRoundedRect;
+    } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x4", "line"))) {
+        return ShapeCmdLine;
     } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x6", "circle"))) {
         return ShapeCmdCircle;
     } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x7", "ellipse"))) {
@@ -256,6 +259,13 @@ static const char *init_shape_item(BaseDisplayItem *item, term req, Context *ctx
                 && get_shape_value_element(req, 3, &c) && get_shape_value_element(req, 4, &d)
                 && get_shape_value_element(req, 5, &e) && get_color_element(req, 6, &color)
                 && (shape = shape_new_rounded_rect(a, b, c, d, e)) != NULL;
+            break;
+
+        case ShapeCmdLine:
+            ok = arity == 7 && get_shape_value_element(req, 1, &a) && get_shape_value_element(req, 2, &b)
+                && get_shape_value_element(req, 3, &c) && get_shape_value_element(req, 4, &d)
+                && get_shape_value_element(req, 5, &e) && get_color_element(req, 6, &color)
+                && (shape = shape_new_line(a, b, c, d, e)) != NULL;
             break;
 
         case ShapeCmdCircle:
