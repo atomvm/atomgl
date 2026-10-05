@@ -34,6 +34,9 @@
 #include "dcs_lcd_draw.h"
 #include "dcs_lcd_screen.h"
 #include "display_items.h"
+#include "epaper_color.h"
+#include "epaper_draw.h"
+#include "mono_draw.h"
 
 #include "alloc_counter.h"
 
@@ -1213,6 +1216,291 @@ static void check_sprite_pixels(const struct Sprite *s, int seed)
     heap_release(mark);
 }
 
+static uint32_t scene_rng = 1;
+
+static int scene_rand(int n)
+{
+    scene_rng = scene_rng * 1103515245u + 12345u;
+    return (int) ((scene_rng >> 8) % (uint32_t) n);
+}
+
+static uint32_t scene_color(void)
+{
+    return ((uint32_t) scene_rand(0x1000000) << 8) | 0xFF;
+}
+
+typedef enum
+{
+    RendererDcsLcd,
+    RendererMono,
+    RendererEpaper
+} renderer_t;
+
+static const char *const renderer_names[] = { "dcs_lcd", "mono", "epaper" };
+
+static int renderer_line_bytes(renderer_t renderer)
+{
+    switch (renderer) {
+        case RendererMono:
+            return SCREEN_W / 8;
+        case RendererEpaper:
+            return SCREEN_W / 2;
+        default:
+            return SCREEN_W * 2;
+    }
+}
+
+static int renderer_draw_x(renderer_t renderer, int w, uint16_t *line, int xpos, int ypos, BaseDisplayItem *row)
+{
+    switch (renderer) {
+        case RendererMono: {
+            struct MonoScreen screen = { .w = w, .h = SCREEN_H };
+            return mono_draw_x(&screen, (uint8_t *) line, xpos, ypos, row);
+        }
+        case RendererEpaper: {
+            struct EpaperScreen screen = { .w = w, .h = SCREEN_H, .palette = epaper_acep_palette, .palette_size = 7 };
+            return epaper_draw_x(&screen, (uint8_t *) line, xpos, ypos, row);
+        }
+        default: {
+            struct DCSLCDScreen screen;
+            memset(&screen, 0, sizeof(screen));
+            screen.w = w;
+            screen.h = SCREEN_H;
+            screen.pixels = line;
+            return dcs_lcd_draw_x(&screen, xpos, ypos, row);
+        }
+    }
+}
+
+// One pixel per call: no run is ever longer than 1, so this is the reference for the runs
+static void render_items(renderer_t renderer, BaseDisplayItem *items, size_t len, uint8_t *frame, bool one_pixel)
+{
+    uint16_t line[SCREEN_W];
+    int line_bytes = renderer_line_bytes(renderer);
+
+    for (int ypos = 0; ypos < SCREEN_H; ypos++) {
+        memset(line, 0, sizeof(line));
+        BaseDisplayItem *row = display_items_row(items, len, ypos);
+        int xpos = 0;
+        while (xpos < SCREEN_W) {
+            int drawn_pixels = renderer_draw_x(renderer, one_pixel ? xpos + 1 : SCREEN_W, line, xpos, ypos, row);
+            if (drawn_pixels <= 0 || (one_pixel && drawn_pixels != 1)) {
+                fprintf(stderr, "%s draw_x returned %d at (%d, %d)\n", renderer_names[renderer], drawn_pixels, xpos,
+                    ypos);
+                abort();
+            }
+            xpos += drawn_pixels;
+        }
+        memcpy(frame + ypos * line_bytes, line, line_bytes);
+    }
+}
+
+static uint32_t *scene_image(int width, int height)
+{
+    static const uint8_t alphas[] = { 0, 0, 0x80, 0xFF, 0xFF, 0xFF };
+    uint32_t *pix = malloc(sizeof(uint32_t) * width * height);
+    if (pix == NULL) {
+        abort();
+    }
+    for (int i = 0; i < width * height; i++) {
+        uint32_t rgb = (uint32_t) scene_rand(0x1000000);
+        uint8_t bytes[4] = { rgb >> 16, rgb >> 8, rgb, alphas[scene_rand(sizeof(alphas))] };
+        memcpy(&pix[i], bytes, 4);
+    }
+    return pix;
+}
+
+static struct ShapeData *scene_shape(void)
+{
+    int x = scene_rand(SCREEN_W + 20) - 10;
+    int y = scene_rand(SCREEN_H + 20) - 10;
+    switch (scene_rand(5)) {
+        case 0:
+            return shape_new_rounded_rect(x, y, 1 + scene_rand(40), 1 + scene_rand(30), scene_rand(12));
+        case 1:
+            return shape_new_ellipse(x, y, 1 + scene_rand(20), 1 + scene_rand(20));
+        case 2:
+            return shape_new_line(x, y, scene_rand(SCREEN_W), scene_rand(SCREEN_H), 1 + scene_rand(6));
+        case 3:
+            return shape_new_arc(x, y, 1 + scene_rand(24), 1 + scene_rand(8), scene_rand(360),
+                scene_rand(360) + 1);
+        default: {
+            struct ShapePoint points[8];
+            int n = 3 + scene_rand(6);
+            for (int i = 0; i < n; i++) {
+                points[i] = (struct ShapePoint){ x + scene_rand(40), y + scene_rand(30) };
+            }
+            return shape_new_polygon(points, n);
+        }
+    }
+}
+
+static void test_runs_match_pixels(void)
+{
+    static const char *const texts[] = { "Hi", "a b", " .:", "#O", "i  I", "  " };
+    static uint8_t expected[SCREEN_W * 2 * SCREEN_H];
+    static uint8_t frame[SCREEN_W * 2 * SCREEN_H];
+
+    for (int scene = 0; scene < 2000; scene++) {
+        BaseDisplayItem items[12];
+        uint32_t *images[12];
+        size_t len = 1 + scene_rand(12);
+        memset(items, 0, sizeof(items));
+        for (size_t i = 0; i < len; i++) {
+            BaseDisplayItem *item = &items[i];
+            images[i] = NULL;
+            item->x = scene_rand(SCREEN_W + 10) - 5;
+            item->y = scene_rand(SCREEN_H + 10) - 5;
+            item->brcolor = scene_rand(2) ? scene_color() : 0;
+            switch (scene_rand(5)) {
+                case 0:
+                    item->primitive = PrimitiveRect;
+                    item->width = 1 + scene_rand(40);
+                    item->height = 1 + scene_rand(30);
+                    item->brcolor = scene_color();
+                    break;
+                case 1:
+                    item->primitive = PrimitiveText;
+                    item->data.text_data.text = texts[scene_rand(sizeof(texts) / sizeof(texts[0]))];
+                    item->data.text_data.fgcolor = scene_color();
+                    item->width = (int) strlen(item->data.text_data.text) * 8;
+                    item->height = 16;
+                    break;
+                case 2:
+                    item->primitive = PrimitiveImage;
+                    item->width = 1 + scene_rand(24);
+                    item->height = 1 + scene_rand(24);
+                    images[i] = scene_image(item->width, item->height);
+                    item->data.image_data.pix = (const char *) images[i];
+                    break;
+                case 3: {
+                    int img_width = 1 + scene_rand(12);
+                    int img_height = 1 + scene_rand(12);
+                    item->primitive = PrimitiveScaledCroppedImage;
+                    item->source_x = scene_rand(img_width);
+                    item->source_y = scene_rand(img_height);
+                    item->x_scale = 1 + scene_rand(3);
+                    item->y_scale = 1 + scene_rand(3);
+                    item->flip_x = scene_rand(2);
+                    item->flip_y = scene_rand(2);
+                    item->width = 1 + scene_rand((img_width - item->source_x) * item->x_scale);
+                    item->height = 1 + scene_rand((img_height - item->source_y) * item->y_scale);
+                    images[i] = scene_image(img_width, img_height);
+                    item->data.image_data_with_size.width = img_width;
+                    item->data.image_data_with_size.height = img_height;
+                    item->data.image_data_with_size.pix = (const char *) images[i];
+                    break;
+                }
+                default: {
+                    struct ShapeData *shape = scene_shape();
+                    if (shape == NULL) {
+                        item->primitive = PrimitiveRect;
+                        item->width = 1;
+                        item->height = 1;
+                        item->brcolor = scene_color();
+                        break;
+                    }
+                    item->primitive = PrimitiveShape;
+                    item->brcolor = scene_color();
+                    item->data.shape_data.shape = shape;
+                    shape_bounds(shape, &item->x, &item->y, &item->width, &item->height);
+                    break;
+                }
+            }
+        }
+
+        bool same = true;
+        for (renderer_t renderer = RendererDcsLcd; renderer <= RendererEpaper && same; renderer++) {
+            render_items(renderer, items, len, expected, true);
+            render_items(renderer, items, len, frame, false);
+            same = memcmp(expected, frame, renderer_line_bytes(renderer) * SCREEN_H) == 0;
+            CHECK(same, "%s scene %d: rendering by runs differs from rendering pixel by pixel",
+                renderer_names[renderer], scene);
+        }
+
+        for (size_t i = 0; i < len; i++) {
+            if (items[i].primitive == PrimitiveShape) {
+                shape_destroy(items[i].data.shape_data.shape);
+            }
+            free(images[i]);
+        }
+        if (!same) {
+            return;
+        }
+    }
+}
+
+static int draw_image_x(renderer_t renderer, BaseDisplayItem *item)
+{
+    uint16_t line[SCREEN_W];
+    memset(line, 0, sizeof(line));
+    bool scaled = item->primitive == PrimitiveScaledCroppedImage;
+    switch (renderer) {
+        case RendererMono: {
+            struct MonoScreen screen = { .w = SCREEN_W, .h = SCREEN_H };
+            return scaled ? mono_draw_scaled_cropped_img_x(&screen, (uint8_t *) line, 0, 0, 2, item)
+                          : mono_draw_image_x(&screen, (uint8_t *) line, 0, 0, 2, item);
+        }
+        case RendererEpaper: {
+            struct EpaperScreen screen = { .w = SCREEN_W, .h = SCREEN_H, .palette = epaper_acep_palette, .palette_size = 7 };
+            return scaled ? epaper_draw_scaled_cropped_img_x(&screen, (uint8_t *) line, 0, 0, 2, item)
+                          : epaper_draw_image_x(&screen, (uint8_t *) line, 0, 0, 2, item);
+        }
+        default: {
+            struct DCSLCDScreen screen;
+            memset(&screen, 0, sizeof(screen));
+            screen.w = SCREEN_W;
+            screen.h = SCREEN_H;
+            screen.pixels = line;
+            return scaled ? dcs_lcd_draw_scaled_cropped_img_x(&screen, 0, 0, 2, item)
+                          : dcs_lcd_draw_image_x(&screen, 0, 0, 2, item);
+        }
+    }
+}
+
+static void test_image_alpha(void)
+{
+    static const uint8_t transparent_red[4] = { 0xFF, 0, 0, 0 };
+    static const uint8_t opaque_black[4] = { 0, 0, 0, 0xFF };
+    struct
+    {
+        const uint8_t *pixels[2];
+        int expected;
+    } cases[] = {
+        { { transparent_red, opaque_black }, -1 },
+        { { opaque_black, transparent_red }, 1 },
+        { { transparent_red, transparent_red }, -2 },
+    };
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        uint8_t pix[8];
+        memcpy(pix, cases[i].pixels[0], 4);
+        memcpy(pix + 4, cases[i].pixels[1], 4);
+        for (renderer_t renderer = RendererDcsLcd; renderer <= RendererEpaper; renderer++) {
+            for (int scaled = 0; scaled < 2; scaled++) {
+                BaseDisplayItem item;
+                memset(&item, 0, sizeof(item));
+                item.width = 2;
+                item.height = 1;
+                if (scaled) {
+                    item.primitive = PrimitiveScaledCroppedImage;
+                    item.x_scale = 1;
+                    item.y_scale = 1;
+                    item.data.image_data_with_size.width = 2;
+                    item.data.image_data_with_size.height = 1;
+                    item.data.image_data_with_size.pix = (const char *) pix;
+                } else {
+                    item.primitive = PrimitiveImage;
+                    item.data.image_data.pix = (const char *) pix;
+                }
+                int drawn = draw_image_x(renderer, &item);
+                CHECK(drawn == cases[i].expected, "%s %s alpha case %zu: returned %d, expected %d",
+                    renderer_names[renderer], scaled ? "scaled image" : "image", i, drawn, cases[i].expected);
+            }
+        }
+    }
+}
+
 static void test_sprite_pixels(void)
 {
     enum
@@ -1289,6 +1577,8 @@ int main(void)
     test_huge_rect_pixels();
     test_image_pixels();
     test_sprite_pixels();
+    test_runs_match_pixels();
+    test_image_alpha();
 
     render(all_items, NULL);
 

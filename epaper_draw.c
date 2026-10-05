@@ -83,7 +83,7 @@ int epaper_draw_image_x(const struct EpaperScreen *screen,
 
     for (int j = xpos - x; j < width; j++) {
         uint32_t img_pixel = READ_32_UNALIGNED(pixels);
-        if ((*pixels >> 24) & 0xFF) {
+        if (rgba8888_get_alpha(img_pixel) != 0) {
             uint8_t r = img_pixel >> 24;
             uint8_t g = (img_pixel >> 16) & 0xFF;
             uint8_t b = (img_pixel >> 8) & 0xFF;
@@ -97,8 +97,14 @@ int epaper_draw_image_x(const struct EpaperScreen *screen,
                 screen->palette, screen->palette_size);
             epaper_draw_pixel_x(screen, line_buf, xpos + drawn_pixels, c);
 
-        } else {
+        } else if (drawn_pixels > 0) {
             return drawn_pixels;
+        } else {
+            int run = 1;
+            while (j + run < width && rgba8888_get_alpha(READ_32_UNALIGNED(pixels + run)) == 0) {
+                run++;
+            }
+            return -run;
         }
         drawn_pixels++;
         pixels++;
@@ -218,8 +224,14 @@ int epaper_draw_text_x(const struct EpaperScreen *screen,
                 screen->palette, screen->palette_size);
             epaper_draw_pixel_x(screen, line_buf, xpos + drawn_pixels, c);
 
-        } else {
+        } else if (drawn_pixels > 0) {
             return drawn_pixels;
+        } else {
+            int run = 1;
+            while (j + run < width && (fontdata[((unsigned char) text[(j + run) / CHAR_WIDTH]) * 16 + ypos - y] & (1 << (7 - (j + run) % CHAR_WIDTH))) == 0) {
+                run++;
+            }
+            return -run;
         }
         drawn_pixels++;
     }
@@ -278,8 +290,14 @@ int epaper_draw_scaled_cropped_img_x(const struct EpaperScreen *screen,
                 screen->palette, screen->palette_size);
             epaper_draw_pixel_x(screen, line_buf, xpos + drawn_pixels, c);
 
-        } else {
+        } else if (drawn_pixels > 0) {
             return drawn_pixels;
+        } else {
+            int run = 1;
+            while (j + run < width && rgba8888_get_alpha(READ_32_UNALIGNED(display_items_scaled_cropped_row_pixel(&src, j + run))) == 0) {
+                run++;
+            }
+            return -run;
         }
         drawn_pixels++;
     }
@@ -336,10 +354,14 @@ int epaper_draw_x(const struct EpaperScreen *screen,
             }
         }
 
-        if (drawn_pixels != 0) {
+        if (drawn_pixels > 0) {
             return drawn_pixels;
         }
 
+        // Transparent for run pixels: images and text return it negated, shapes set it
+        if (drawn_pixels < 0) {
+            run = -drawn_pixels;
+        }
         if (run < transparent_run) {
             transparent_run = run;
         }

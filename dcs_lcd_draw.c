@@ -67,8 +67,14 @@ int dcs_lcd_draw_image_x(const struct DCSLCDScreen *screen,
             uint16_t color = rgba8888_color_to_rgb565(img_pixel);
             uint16_t blended = alpha_blend_rgb565(color, bgcolor, alpha);
             pixmem16[drawn_pixels] = rgb565_color_to_surface(blended);
-        } else {
+        } else if (drawn_pixels > 0) {
             return drawn_pixels;
+        } else {
+            int run = 1;
+            while (j + run < width && rgba8888_get_alpha(READ_32_UNALIGNED(pixels + run)) != 0xFF) {
+                run++;
+            }
+            return -run;
         }
         drawn_pixels++;
         pixels++;
@@ -166,8 +172,14 @@ int dcs_lcd_draw_text_x(const struct DCSLCDScreen *screen,
             pixmem16[drawn_pixels] = fgcolor;
         } else if (visible_bg) {
             pixmem16[drawn_pixels] = bgcolor;
-        } else {
+        } else if (drawn_pixels > 0) {
             return drawn_pixels;
+        } else {
+            int run = 1;
+            while (j + run < width && (fontdata[((unsigned char) text[(j + run) / CHAR_WIDTH]) * 16 + ypos - y] & (1 << (7 - (j + run) % CHAR_WIDTH))) == 0) {
+                run++;
+            }
+            return -run;
         }
         drawn_pixels++;
     }
@@ -214,8 +226,14 @@ int dcs_lcd_draw_scaled_cropped_img_x(const struct DCSLCDScreen *screen,
             uint16_t color = rgba8888_color_to_rgb565(img_pixel);
             uint16_t blended = alpha_blend_rgb565(color, bgcolor, alpha);
             pixmem16[drawn_pixels] = rgb565_color_to_surface(blended);
-        } else {
+        } else if (drawn_pixels > 0) {
             return drawn_pixels;
+        } else {
+            int run = 1;
+            while (j + run < width && rgba8888_get_alpha(READ_32_UNALIGNED(display_items_scaled_cropped_row_pixel(&src, j + run))) != 0xFF) {
+                run++;
+            }
+            return -run;
         }
         drawn_pixels++;
     }
@@ -271,10 +289,14 @@ int dcs_lcd_draw_x(const struct DCSLCDScreen *screen,
             }
         }
 
-        if (drawn_pixels != 0) {
+        if (drawn_pixels > 0) {
             return drawn_pixels;
         }
 
+        // Transparent for run pixels: images and text return it negated, shapes set it
+        if (drawn_pixels < 0) {
+            run = -drawn_pixels;
+        }
         if (run < transparent_run) {
             transparent_run = run;
         }

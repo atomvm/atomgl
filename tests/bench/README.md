@@ -26,9 +26,8 @@ is why they live here and not in `tests/shapes`:
 
 - `bench`: times the DCS LCD scanline renderer over a set of scenes.
 - `test_flip`: checks that `scaled_cropped_image` source pixel lookups,
-  flipped or not, stay inside the source image, and that the per-row
-  walk the renderers use returns the same pixels as the reference
-  helper.
+  flipped or not, stay inside the source image and return the same
+  pixels as a reference mapping kept in the test.
 
 Build and run (`LIBATOMVM_INCLUDE_PATH` points at AtomVM's
 `src/libAtomVM`; only headers are used, nothing from AtomVM is linked):
@@ -55,8 +54,8 @@ replaced by a `rect` of its bounding box: the ratio is what the shapes
 cost over flat rects of the same size.
 
 The scenes cover single shapes, grids of small shapes, 50 overlapping
-circles, 12 lines and 5 arcs that all cross the same rows, a 256-point
-comb polygon (the most points a polygon may have, with about 128 edge
+circles, 12 lines and 5 arcs that all cross the same rows, a 64-point
+comb polygon (the most points a polygon may have, with about 32 edge
 crossings on every row) next to a 4-point polygon of the same bounding
 box, a text UI with 25 text items, and full-screen sprites at scale 1
 and 3, plain and flipped.
@@ -68,50 +67,50 @@ predict frame rates on the device. Example output (Apple Silicon, -O3):
 ```
 scene                        us/frame   us/line
 background only                   4.1      0.02
-rounded_rect                      7.8      0.03
-circle                            9.2      0.04
-ellipse                           8.9      0.04
-thin line                         4.6      0.02
-diagonal thick line              11.9      0.05
-arc gauge                        18.7      0.08
-ring                             14.9      0.06
-full-screen circle               19.0      0.08
-star polygon                     13.0      0.05
-20 bullets                       25.5      0.11
-50 overlapping bullets          114.6      0.48
-6 buttons                        18.0      0.07
-12 crossing lines                70.9      0.30
-5 concentric arcs               110.0      0.46
-256-point comb polygon          214.9      0.90
-4-point polygon, comb bbox        6.5      0.03
-text UI (25 text items)         210.6      0.88
-sprite x1                        41.1      0.17
-sprite x3                        42.6      0.18
-sprite x1 flip x                 41.6      0.17
-sprite x1 flip xy                41.1      0.17
-sprite x3 flip x                 42.6      0.18
-sprite x3 flip xy                43.3      0.18
+rounded_rect                      7.6      0.03
+circle                            9.6      0.04
+ellipse                           9.1      0.04
+thin line                         4.5      0.02
+diagonal thick line              12.3      0.05
+arc gauge                        18.4      0.08
+ring                             15.4      0.06
+full-screen circle               18.5      0.08
+star polygon                     14.0      0.06
+20 bullets                       28.5      0.12
+50 overlapping bullets          118.4      0.49
+6 buttons                        20.4      0.08
+12 crossing lines                75.2      0.31
+5 concentric arcs               115.6      0.48
+64-point comb polygon            71.7      0.30
+4-point polygon, comb bbox        6.6      0.03
+text UI (25 text items)          71.9      0.30
+sprite x1                        35.5      0.15
+sprite x3                        44.5      0.19
+sprite x1 flip x                 41.4      0.17
+sprite x1 flip xy                39.9      0.17
+sprite x3 flip x                 48.9      0.20
+sprite x3 flip xy                48.3      0.20
 
 shapes vs. rects of their bounding boxes
 scene                        shape us    rect us   ratio
-rounded_rect                      7.8        4.5    1.75
-circle                            9.2        4.4    2.09
-ellipse                           8.9        4.3    2.06
-thin line                         4.6        4.1    1.11
-diagonal thick line              11.9        5.4    2.22
-arc gauge                        18.7        5.0    3.77
-ring                             14.9        5.0    2.97
-full-screen circle               19.0        4.4    4.30
-star polygon                     13.0        5.1    2.56
-20 bullets                       25.5       13.0    1.97
-50 overlapping bullets          114.6       32.6    3.52
-6 buttons                        18.0        7.6    2.36
-12 crossing lines                70.9        4.1   17.27
-5 concentric arcs               110.0       12.5    8.79
-256-point comb polygon          214.9        5.2   41.64
-4-point polygon, comb bbox        6.5        5.3    1.23
+rounded_rect                      7.6        4.4    1.72
+circle                            9.6        4.4    2.18
+ellipse                           9.1        4.4    2.07
+thin line                         4.5        4.2    1.07
+diagonal thick line              12.3        5.3    2.31
+arc gauge                        18.4        5.0    3.68
+ring                             15.4        5.0    3.09
+full-screen circle               18.5        4.4    4.25
+star polygon                     14.0        5.7    2.47
+20 bullets                       28.5       12.2    2.33
+50 overlapping bullets          118.4       35.1    3.38
+6 buttons                        20.4        8.2    2.49
+12 crossing lines                75.2        4.3   17.46
+5 concentric arcs               115.6       12.8    9.02
+64-point comb polygon            71.7        5.1   14.00
+4-point polygon, comb bbox        6.6        5.2    1.27
 
-256-point comb over a 4-point polygon of its bbox: 32.97x
+64-point comb over a 4-point polygon of its bbox: 10.94x
 ```
 
 The rect version of a scene of long lines is a stack of full-screen
@@ -162,8 +161,6 @@ star polygon                      7 - 13
 sprite x1, x3, flipped or not    18 - 30
 5 concentric arcs                77 - 148
 50 overlapping bullets          143 - 254
-256-point comb polygon          125 - 229
-text UI (25 text items)         243 - 419
 ```
 
 A line costs roughly a fixed amount per item that crosses it plus a
@@ -181,7 +178,9 @@ below are for the 96 us of a 240 px panel at 40 MHz):
 - Many overlapping items: every draw call walks the items that cover
   the line, so a line where 50 items overlap and break it into 40 runs
   costs 2000 item visits. Items above or below the line cost only one
-  bounding box test per line.
+  bounding box test per line. Transparent text and image pixels are
+  skipped as whole runs, so text without a background costs about one
+  run per glyph stroke.
 
 Past the line time the frame only gets longer: each slow line delays
 the next transfer by its excess.

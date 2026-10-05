@@ -33,18 +33,20 @@ endif()
 option(ITEMS_SANITIZE "Build with ASan and UBSan, aborting on the first report" ON)
 
 add_executable(test_items test_items.c atomvm_stubs.c alloc_counter.c
-    ../../display_items.c ../../shape.c ../../dcs_lcd_draw.c ../../font_data.c)
+    ../../display_items.c ../../shape.c ../../dcs_lcd_draw.c ../../mono_draw.c
+    ../../epaper_draw.c ../../epaper_color.c ../../font_data.c)
 set_source_files_properties(../../display_items.c ../../shape.c PROPERTIES
     COMPILE_OPTIONS "-include;${CMAKE_CURRENT_SOURCE_DIR}/alloc_counter.h")
 target_include_directories(test_items PRIVATE ../.. ../stubs ${LIBATOMVM_INCLUDE_PATH})
 target_compile_definitions(test_items PRIVATE HAVE_ATOMIC)
+target_link_libraries(test_items PRIVATE m)
 target_compile_options(test_items PRIVATE -Wall -Wextra -Wno-unused-parameter)
 if (ITEMS_SANITIZE)
     set(SANITIZE_FLAGS -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
     target_compile_options(test_items PRIVATE ${SANITIZE_FLAGS})
     target_link_options(test_items PRIVATE ${SANITIZE_FLAGS})
     # READ_32_UNALIGNED left-shifts bytes >= 0x80 into the sign bit
-    set_source_files_properties(../../dcs_lcd_draw.c PROPERTIES
+    set_source_files_properties(../../dcs_lcd_draw.c ../../mono_draw.c ../../epaper_draw.c PROPERTIES
         COMPILE_OPTIONS "-fno-sanitize=shift-base")
     # term_from_int left-shifts negative values
     set_source_files_properties(test_items.c PROPERTIES

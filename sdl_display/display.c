@@ -129,13 +129,19 @@ static int draw_image_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *i
 
     for (int j = xpos - x; j < width; j++) {
         uint32_t img_pixel = READ_32_UNALIGNED(pixels);
-        if ((*pixels >> 24) & 0xFF) {
+        if (rgba8888_get_alpha(img_pixel) != 0) {
             Uint32 color = uint32_color_to_surface(screen, img_pixel);
             pixmem32[drawn_pixels] = color;
         } else if (visible_bg) {
             pixmem32[drawn_pixels] = bgcolor;
-        } else {
+        } else if (drawn_pixels > 0) {
             return drawn_pixels;
+        } else {
+            int run = 1;
+            while (j + run < width && rgba8888_get_alpha(READ_32_UNALIGNED(pixels + run)) == 0) {
+                run++;
+            }
+            return -run;
         }
         drawn_pixels++;
         pixels++;
@@ -179,8 +185,14 @@ static int draw_scaled_cropped_img_x(int xpos, int ypos, int max_line_len, BaseD
             pixmem32[drawn_pixels] = color;
         } else if (visible_bg) {
             pixmem32[drawn_pixels] = bgcolor;
-        } else {
+        } else if (drawn_pixels > 0) {
             return drawn_pixels;
+        } else {
+            int run = 1;
+            while (j + run < width && rgba8888_get_alpha(READ_32_UNALIGNED(display_items_scaled_cropped_row_pixel(&src, j + run))) == 0) {
+                run++;
+            }
+            return -run;
         }
         drawn_pixels++;
     }
@@ -274,8 +286,14 @@ static int draw_text_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *it
             pixmem32[drawn_pixels] = fgcolor;
         } else if (visible_bg) {
             pixmem32[drawn_pixels] = bgcolor;
-        } else {
+        } else if (drawn_pixels > 0) {
             return drawn_pixels;
+        } else {
+            int run = 1;
+            while (j + run < width && (fontdata[((unsigned char) text[(j + run) / CHAR_WIDTH]) * 16 + ypos - y] & (1 << (7 - (j + run) % CHAR_WIDTH))) == 0) {
+                run++;
+            }
+            return -run;
         }
         drawn_pixels++;
     }
@@ -330,10 +348,14 @@ static int draw_x(int xpos, int ypos, BaseDisplayItem *row)
             }
         }
 
-        if (drawn_pixels != 0) {
+        if (drawn_pixels > 0) {
             return drawn_pixels;
         }
 
+        // Transparent for run pixels: images and text return it negated, shapes set it
+        if (drawn_pixels < 0) {
+            run = -drawn_pixels;
+        }
         if (run < transparent_run) {
             transparent_run = run;
         }
