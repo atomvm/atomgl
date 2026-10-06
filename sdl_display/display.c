@@ -269,16 +269,12 @@ static int draw_text_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *it
     return drawn_pixels;
 }
 
-static int draw_x(int xpos, int ypos, BaseDisplayItem items[], size_t items_len)
+static int draw_x(int xpos, int ypos, BaseDisplayItem *row)
 {
     int line_len = screen->w - xpos;
     bool below = false;
 
-    for (size_t i = 0; i < items_len; i++) {
-        BaseDisplayItem *item = &items[i];
-        if ((ypos < item->y) || (ypos >= item->y + item->height)) {
-            continue;
-        }
+    for (BaseDisplayItem *item = row; item != NULL; item = item->next) {
         if (xpos < item->x) {
             int len_to_item = item->x - xpos;
             if (len_to_item < line_len) {
@@ -293,7 +289,7 @@ static int draw_x(int xpos, int ypos, BaseDisplayItem items[], size_t items_len)
         int max_line_len = below ? 1 : line_len;
 
         int drawn_pixels = 0;
-        switch (items[i].primitive) {
+        switch (item->primitive) {
             case PrimitiveImage:
                 drawn_pixels = draw_image_x(xpos, ypos, max_line_len, item);
                 break;
@@ -334,9 +330,10 @@ static void do_update(Context *ctx, term display_list)
     }
 
     for (int ypos = 0; ypos < screen->h; ypos++) {
+        BaseDisplayItem *row = display_items_row(items, len, ypos);
         int xpos = 0;
         while (xpos < screen->w) {
-            xpos += draw_x(xpos, ypos, items, len);
+            xpos += draw_x(xpos, ypos, row);
         }
     }
 

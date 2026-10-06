@@ -84,6 +84,10 @@ struct BaseDisplayItem
     int y_scale;
 
     bool owns_data;
+
+    // Rendering scratch, never compared: the next item that covers the row being drawn, see
+    // display_items_row()
+    struct BaseDisplayItem *next;
 };
 
 typedef struct BaseDisplayItem BaseDisplayItem;
@@ -94,6 +98,23 @@ typedef enum
     DisplayItemsNotAProperList,
     DisplayItemsOutOfMemory
 } display_items_result_t;
+
+// Links the items that cover row ypos through their next field, in display list order, and
+// returns the first of them, or NULL if none does.
+static inline BaseDisplayItem *display_items_row(BaseDisplayItem items[], size_t items_len, int ypos)
+{
+    BaseDisplayItem *head = NULL;
+    BaseDisplayItem **link = &head;
+    for (size_t i = 0; i < items_len; i++) {
+        BaseDisplayItem *item = &items[i];
+        if (ypos >= item->y && ypos < item->y + item->height) {
+            *link = item;
+            link = &item->next;
+        }
+    }
+    *link = NULL;
+    return head;
+}
 
 void display_items_init_item(BaseDisplayItem *item, term req, Context *ctx);
 

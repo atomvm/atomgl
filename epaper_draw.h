@@ -45,6 +45,6 @@ int epaper_draw_scaled_cropped_img_x(const struct EpaperScreen *screen,
 
 int epaper_draw_x(const struct EpaperScreen *screen,
     uint8_t *line_buf, int xpos, int ypos,
-    BaseDisplayItem items[], size_t items_len);
+    BaseDisplayItem *row);
 
 #endif

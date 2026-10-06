@@ -118,9 +118,10 @@ static void do_update(Context *ctx, term display_list)
 
         memset(buf + 2, 0xFF, DISPLAY_WIDTH / 8);
 
+        BaseDisplayItem *row = display_items_row(items, len, ypos);
         int xpos = 0;
         while (xpos < screen_width) {
-            int drawn_pixels = mono_draw_x(&driver->screen, buf + 2, xpos, ypos, items, len);
+            int drawn_pixels = mono_draw_x(&driver->screen, buf + 2, xpos, ypos, row);
             xpos += drawn_pixels;
         }
 

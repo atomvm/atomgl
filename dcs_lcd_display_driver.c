@@ -156,9 +156,10 @@ static void do_update(Context *ctx, term display_list)
     bool transaction_in_progress = false;
 
     for (int ypos = 0; ypos < screen_height; ypos++) {
+        BaseDisplayItem *row = display_items_row(items, len, ypos);
         int xpos = 0;
         while (xpos < screen_width) {
-            int drawn_pixels = dcs_lcd_draw_x(&driver->screen, xpos, ypos, items, len);
+            int drawn_pixels = dcs_lcd_draw_x(&driver->screen, xpos, ypos, row);
             xpos += drawn_pixels;
         }
 
