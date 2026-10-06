@@ -195,12 +195,6 @@ static inline void display_items_scaled_cropped_row_init(struct ScaledCroppedRow
         item->x_scale, item->flip_x);
 }
 
-static inline const uint32_t *display_items_scaled_cropped_row_pixel(
-    const struct ScaledCroppedRow *row, int col_px)
-{
-    return row->pixels + display_items_scaled_cropped_axis_src(&row->cols, col_px);
-}
-
 static inline bool display_items_shape_outside_run(const BaseDisplayItem *item, int xpos, int ypos,
     int *run)
 {
@@ -222,6 +216,35 @@ static inline void display_items_shape_remember_outside(BaseDisplayItem *item, i
     data->outside_row = (int16_t) ypos;
     data->outside_from = (int16_t) xpos;
     data->outside_to = (int16_t) (xpos + run);
+}
+
+// The source pixel shown at display column col_px of the row, and in *run how many display
+// columns from col_px, up to end, show that same source pixel.
+static inline __attribute__((always_inline)) const uint32_t *display_items_scaled_cropped_row_run(
+    const struct ScaledCroppedRow *row, int col_px, int end, int *run)
+{
+    const struct ScaledCroppedAxis *cols = &row->cols;
+    int src;
+    int left;
+    if (!cols->flip) {
+        src = col_px / cols->scale;
+        left = (src + 1) * cols->scale - col_px;
+        if (src >= cols->last_src) {
+            src = cols->last_src;
+            left = end - col_px;
+        }
+    } else {
+        int px = cols->last_px - col_px;
+        if (px >= 0) {
+            src = px / cols->scale;
+            left = px - src * cols->scale + 1;
+        } else {
+            src = 0;
+            left = end - col_px;
+        }
+    }
+    *run = (left < end - col_px) ? left : end - col_px;
+    return row->pixels + src;
 }
 
 void display_items_init_item(BaseDisplayItem *item, term req, Context *ctx);

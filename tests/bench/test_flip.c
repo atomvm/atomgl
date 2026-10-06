@@ -56,13 +56,16 @@ static void check_in_bounds(const char *name, BaseDisplayItem *item, const uint3
     for (int row_px = 0; row_px < item->height; row_px++) {
         struct ScaledCroppedRow src;
         display_items_scaled_cropped_row_init(&src, item, row_px);
-        for (int col_px = 0; col_px < item->width; col_px++) {
-            const uint32_t *p = display_items_scaled_cropped_row_pixel(&src, col_px);
+        int col_px = 0;
+        while (col_px < item->width) {
+            int run;
+            const uint32_t *p = display_items_scaled_cropped_row_run(&src, col_px, item->width, &run);
             if (p < lo || p >= hi) {
                 fprintf(stderr, "%s: (%d,%d) -> pointer %ld outside [0, %d)\n", name, col_px,
                     row_px, (long) (p - pix), img_width * img_height);
                 failures++;
             }
+            col_px += run;
         }
     }
 }
@@ -87,19 +90,33 @@ static BaseDisplayItem make_item(int width, int height, int source_x, int source
     return item;
 }
 
+// Every run, walked from any start column, covers 1 to (end - start) columns that all map to
+// the pixel it returns
 static void check_row_walk(const char *name, BaseDisplayItem *item)
 {
     for (int row_px = 0; row_px < item->height; row_px++) {
         struct ScaledCroppedRow src;
         display_items_scaled_cropped_row_init(&src, item, row_px);
-        for (int col_px = 0; col_px < item->width; col_px++) {
-            const uint32_t *p = display_items_scaled_cropped_row_pixel(&src, col_px);
-            const uint32_t *expected = expected_pixel(item, col_px, row_px);
-            if (p != expected) {
-                fprintf(stderr, "%s: (%d,%d) is %ld pixels off\n", name, col_px, row_px,
-                    (long) (p - expected));
-                failures++;
-                return;
+        for (int start = 0; start < item->width; start++) {
+            int col_px = start;
+            while (col_px < item->width) {
+                int run;
+                const uint32_t *p = display_items_scaled_cropped_row_run(&src, col_px, item->width, &run);
+                if (run < 1 || col_px + run > item->width) {
+                    fprintf(stderr, "%s: run %d at (%d,%d)\n", name, run, col_px, row_px);
+                    failures++;
+                    return;
+                }
+                for (int k = 0; k < run; k++) {
+                    const uint32_t *expected = expected_pixel(item, col_px + k, row_px);
+                    if (p != expected) {
+                        fprintf(stderr, "%s: (%d,%d) walked from %d is %ld pixels off\n", name,
+                            col_px + k, row_px, start, (long) (p - expected));
+                        failures++;
+                        return;
+                    }
+                }
+                col_px += run;
             }
         }
     }

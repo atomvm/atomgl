@@ -60,57 +60,62 @@ crossings on every row) next to a 4-point polygon of the same bounding
 box, a text UI with 25 text items, and full-screen sprites at scale 1
 and 3, plain and flipped.
 
+Scaled images are drawn one source pixel at a time, which suits the
+ESP32 build (optimized for size with -Os) but does not vectorize on
+the host: the sprite scenes at scale 1 are much slower here than on a
+build that draws pixel by pixel, while on the device they are not.
+
 Host numbers are only meaningful relative to each other. The host has no
 SPI bus and its CPU is much faster than the ESP32-S3's, so they do not
 predict frame rates on the device. Example output (Apple Silicon, -O3):
 
 ```
 scene                        us/frame   us/line
-background only                   4.1      0.02
-rounded_rect                      7.6      0.03
-circle                            9.6      0.04
-ellipse                           9.1      0.04
-thin line                         4.5      0.02
-diagonal thick line              12.3      0.05
-arc gauge                        18.4      0.08
-ring                             15.4      0.06
-full-screen circle               18.5      0.08
+background only                   4.3      0.02
+rounded_rect                      8.0      0.03
+circle                            9.7      0.04
+ellipse                           9.4      0.04
+thin line                         4.7      0.02
+diagonal thick line              12.6      0.05
+arc gauge                        18.8      0.08
+ring                             16.0      0.07
+full-screen circle               18.8      0.08
 star polygon                     14.0      0.06
-20 bullets                       28.5      0.12
-50 overlapping bullets          118.4      0.49
-6 buttons                        20.4      0.08
-12 crossing lines                75.2      0.31
-5 concentric arcs               115.6      0.48
-64-point comb polygon            71.7      0.30
-4-point polygon, comb bbox        6.6      0.03
-text UI (25 text items)          71.9      0.30
-sprite x1                        35.5      0.15
-sprite x3                        44.5      0.19
-sprite x1 flip x                 41.4      0.17
-sprite x1 flip xy                39.9      0.17
-sprite x3 flip x                 48.9      0.20
-sprite x3 flip xy                48.3      0.20
+20 bullets                       27.3      0.11
+50 overlapping bullets          126.6      0.53
+6 buttons                        20.0      0.08
+12 crossing lines                77.0      0.32
+5 concentric arcs               122.1      0.51
+64-point comb polygon            76.5      0.32
+4-point polygon, comb bbox        6.7      0.03
+text UI (25 text items)          74.6      0.31
+sprite x1                       224.5      0.94
+sprite x3                        78.9      0.33
+sprite x1 flip x                232.7      0.97
+sprite x1 flip xy               230.9      0.96
+sprite x3 flip x                 79.1      0.33
+sprite x3 flip xy                79.4      0.33
 
 shapes vs. rects of their bounding boxes
 scene                        shape us    rect us   ratio
-rounded_rect                      7.6        4.4    1.72
-circle                            9.6        4.4    2.18
-ellipse                           9.1        4.4    2.07
-thin line                         4.5        4.2    1.07
-diagonal thick line              12.3        5.3    2.31
-arc gauge                        18.4        5.0    3.68
-ring                             15.4        5.0    3.09
-full-screen circle               18.5        4.4    4.25
-star polygon                     14.0        5.7    2.47
-20 bullets                       28.5       12.2    2.33
-50 overlapping bullets          118.4       35.1    3.38
-6 buttons                        20.4        8.2    2.49
-12 crossing lines                75.2        4.3   17.46
-5 concentric arcs               115.6       12.8    9.02
-64-point comb polygon            71.7        5.1   14.00
-4-point polygon, comb bbox        6.6        5.2    1.27
+rounded_rect                      8.0        4.5    1.78
+circle                            9.7        4.5    2.17
+ellipse                           9.4        4.5    2.08
+thin line                         4.7        4.3    1.09
+diagonal thick line              12.6        5.5    2.27
+arc gauge                        18.8        5.1    3.70
+ring                             16.0        5.1    3.11
+full-screen circle               18.8        4.3    4.34
+star polygon                     14.0        5.3    2.66
+20 bullets                       27.3       13.7    2.00
+50 overlapping bullets          126.6       36.1    3.50
+6 buttons                        20.0        8.7    2.29
+12 crossing lines                77.0        4.4   17.56
+5 concentric arcs               122.1       13.4    9.09
+64-point comb polygon            76.5        5.5   14.01
+4-point polygon, comb bbox        6.7        5.3    1.26
 
-64-point comb over a 4-point polygon of its bbox: 10.94x
+64-point comb over a 4-point polygon of its bbox: 11.43x
 ```
 
 The rect version of a scene of long lines is a stack of full-screen

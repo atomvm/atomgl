@@ -215,27 +215,32 @@ int dcs_lcd_draw_scaled_cropped_img_x(const struct DCSLCDScreen *screen,
     struct ScaledCroppedRow src;
     display_items_scaled_cropped_row_init(&src, item, ypos - y);
 
-    for (int j = xpos - x; j < width; j++) {
-        const uint32_t *pixels = display_items_scaled_cropped_row_pixel(&src, j);
-        uint32_t img_pixel = READ_32_UNALIGNED(pixels);
+    int j = xpos - x;
+    while (j < width) {
+        int run;
+        uint32_t img_pixel = READ_32_UNALIGNED(display_items_scaled_cropped_row_run(&src, j, width, &run));
         uint8_t alpha = rgba8888_get_alpha(img_pixel);
+        uint16_t color;
         if (alpha == 0xFF) {
-            uint16_t color = uint32_color_to_surface(img_pixel);
-            pixmem16[drawn_pixels] = color;
+            color = uint32_color_to_surface(img_pixel);
         } else if (visible_bg) {
-            uint16_t color = rgba8888_color_to_rgb565(img_pixel);
-            uint16_t blended = alpha_blend_rgb565(color, bgcolor, alpha);
-            pixmem16[drawn_pixels] = rgb565_color_to_surface(blended);
+            color = rgb565_color_to_surface(alpha_blend_rgb565(rgba8888_color_to_rgb565(img_pixel), bgcolor, alpha));
         } else if (drawn_pixels > 0) {
             return drawn_pixels;
         } else {
-            int run = 1;
-            while (j + run < width && rgba8888_get_alpha(READ_32_UNALIGNED(display_items_scaled_cropped_row_pixel(&src, j + run))) != 0xFF) {
-                run++;
+            int transparent = run;
+            j += run;
+            while (j < width
+                && rgba8888_get_alpha(READ_32_UNALIGNED(display_items_scaled_cropped_row_run(&src, j, width, &run))) != 0xFF) {
+                transparent += run;
+                j += run;
             }
-            return -run;
+            return -transparent;
         }
-        drawn_pixels++;
+        for (int k = 0; k < run; k++) {
+            pixmem16[drawn_pixels++] = color;
+        }
+        j += run;
     }
 
     return drawn_pixels;

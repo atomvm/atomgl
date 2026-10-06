@@ -177,24 +177,32 @@ static int draw_scaled_cropped_img_x(int xpos, int ypos, int max_line_len, BaseD
     struct ScaledCroppedRow src;
     display_items_scaled_cropped_row_init(&src, item, ypos - y);
 
-    for (int j = xpos - x; j < width; j++) {
-        const uint32_t *pixels = display_items_scaled_cropped_row_pixel(&src, j);
-        uint32_t img_pixel = READ_32_UNALIGNED(pixels);
+    int j = xpos - x;
+    while (j < width) {
+        int run;
+        uint32_t img_pixel = READ_32_UNALIGNED(display_items_scaled_cropped_row_run(&src, j, width, &run));
         if (rgba8888_get_alpha(img_pixel) != 0) {
             Uint32 color = uint32_color_to_surface(screen, img_pixel);
-            pixmem32[drawn_pixels] = color;
+            for (int k = 0; k < run; k++) {
+                pixmem32[drawn_pixels++] = color;
+            }
         } else if (visible_bg) {
-            pixmem32[drawn_pixels] = bgcolor;
+            for (int k = 0; k < run; k++) {
+                pixmem32[drawn_pixels++] = bgcolor;
+            }
         } else if (drawn_pixels > 0) {
             return drawn_pixels;
         } else {
-            int run = 1;
-            while (j + run < width && rgba8888_get_alpha(READ_32_UNALIGNED(display_items_scaled_cropped_row_pixel(&src, j + run))) == 0) {
-                run++;
+            int transparent = run;
+            j += run;
+            while (j < width
+                && rgba8888_get_alpha(READ_32_UNALIGNED(display_items_scaled_cropped_row_run(&src, j, width, &run))) == 0) {
+                transparent += run;
+                j += run;
             }
-            return -run;
+            return -transparent;
         }
-        drawn_pixels++;
+        j += run;
     }
 
     return drawn_pixels;

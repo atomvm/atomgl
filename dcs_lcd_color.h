@@ -36,7 +36,7 @@ static inline uint16_t alpha_blend_rgb565(uint32_t fg, uint32_t bg, uint8_t alph
     return (uint16_t) ((result >> 16) | result);
 }
 
-static inline uint16_t rgba8888_color_to_rgb565(uint32_t color)
+static inline __attribute__((always_inline)) uint16_t rgba8888_color_to_rgb565(uint32_t color)
 {
     uint8_t r = color >> 24;
     uint8_t g = (color >> 16) & 0xFF;
@@ -45,12 +45,12 @@ static inline uint16_t rgba8888_color_to_rgb565(uint32_t color)
     return (((uint16_t) (r >> 3)) << 11) | (((uint16_t) (g >> 2)) << 5) | ((uint16_t) b >> 3);
 }
 
-static inline uint16_t rgb565_color_to_surface(uint16_t color16)
+static inline __attribute__((always_inline)) uint16_t rgb565_color_to_surface(uint16_t color16)
 {
     return (uint16_t) SPI_SWAP_DATA_TX(color16, 16);
 }
 
-static inline uint16_t uint32_color_to_surface(uint32_t color)
+static inline __attribute__((always_inline)) uint16_t uint32_color_to_surface(uint32_t color)
 {
     uint16_t color16 = rgba8888_color_to_rgb565(color);
 
