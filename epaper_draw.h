@@ -27,23 +27,12 @@
 void epaper_draw_pixel_x(const struct EpaperScreen *screen,
     uint8_t *line_buf, int xpos, uint8_t c);
 
-int epaper_draw_image_x(const struct EpaperScreen *screen,
-    uint8_t *line_buf, int xpos, int ypos, int max_line_len,
-    BaseDisplayItem *item);
-
-int epaper_draw_rect_x(const struct EpaperScreen *screen,
-    uint8_t *line_buf, int xpos, int ypos, int max_line_len,
-    BaseDisplayItem *item);
-
-int epaper_draw_text_x(const struct EpaperScreen *screen,
-    uint8_t *line_buf, int xpos, int ypos, int max_line_len,
-    BaseDisplayItem *item);
-
-int epaper_draw_scaled_cropped_img_x(const struct EpaperScreen *screen,
-    uint8_t *line_buf, int xpos, int ypos, int max_line_len,
-    BaseDisplayItem *item);
 
 int epaper_draw_x(const struct EpaperScreen *screen,
+    uint8_t *line_buf, int xpos, int ypos,
+    BaseDisplayItem items[], size_t items_len);
+
+int epaper_draw_4gray_x(const struct EpaperScreen *screen,
     uint8_t *line_buf, int xpos, int ypos,
     BaseDisplayItem items[], size_t items_len);
 

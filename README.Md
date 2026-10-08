@@ -83,7 +83,9 @@ that would otherwise be impossible to support with traditional frame buffer appr
 * `ilitek,ili9341` / `ilitek,ili9342c`: ILI9341 / ILI9342C - 240x320, 16-bit colors
 * `ilitek,ili9486`: ILI9486 - 320x480, 16-bit colors (RGB565)
 * `ilitek,ili9488`: ILI9488 - 320x480, 18-bit colors (RGB666 over SPI; 3 bytes/pixel transfer)
-* `waveshare,5in65-acep-7c`: Waveshare 7-color 5.65" ACeP display module - 600x480, 7 colors +
+* `waveshare,5in65-acep-7c`: Waveshare 7-color 5.65" ACeP display module - 600x448, 7 colors +
+software dithering
+* `good-display/gdep073e01`: Good Display 7.3" 7-color e-paper module - 800x480, 7 colors +
 software dithering
 * `sharp,memory-lcd`: Sharp Memory LCDs - 400x240, 1-bit monochrome
 * `solomon-systech,ssd1306`: Solomon Systech SSD1306 - 128x64, 1-bit monochrome
@@ -92,6 +94,39 @@ software dithering
 [SDL Linux display](sdl_display/) is also supported and can be built as an AtomVM plugin.
 
 See also [display drivers](docs/display-drivers.md) documentation page for additional information.
+
+### E-paper panel descriptors
+
+Ready-made e-paper panel descriptors are provided as a separate,
+dependency-free Erlang/OTP library in [`atomgl_epaper/`](atomgl_epaper/). It
+can be consumed as a sparse / `subdir` dependency directly from this
+repository — see [`atomgl_epaper/README.md`](atomgl_epaper/README.md) for
+details.
+
+For Erlang (`rebar3`):
+
+```erlang
+%% rebar.config
+{deps, [
+    {atomgl_epaper,
+        {git, "https://github.com/atomvm/atomgl.git", {branch, "main"}},
+        [{subdir, "atomgl_epaper"}]}
+]}.
+```
+
+For Elixir (Mix), add the dependency to `mix.exs`:
+
+```elixir
+# mix.exs
+defp deps do
+  [
+    {:atomgl_epaper,
+      github: "atomvm/atomgl",
+      branch: "main",
+      sparse: "atomgl_epaper"}
+  ]
+end
+```
 
 ## Platform Support
 
