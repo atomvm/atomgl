@@ -238,10 +238,11 @@ static void render(term display_list, uint16_t *frame)
     screen.pixels = line;
 
     for (int ypos = 0; ypos < SCREEN_H; ypos++) {
+        BaseDisplayItem *row = display_items_row(items, len, ypos);
         memset(line, 0, sizeof(line));
         int xpos = 0;
         while (xpos < SCREEN_W) {
-            int drawn_pixels = dcs_lcd_draw_x(&screen, xpos, ypos, items, len);
+            int drawn_pixels = dcs_lcd_draw_x(&screen, xpos, ypos, row);
             if (drawn_pixels <= 0) {
                 fprintf(stderr, "dcs_lcd_draw_x returned %d at (%d, %d)\n", drawn_pixels, xpos, ypos);
                 abort();

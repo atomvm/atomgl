@@ -215,9 +215,10 @@ static void do_update(Context *ctx, term display_list)
             spi_device_get_trans_result(driver->bus.spi_disp.handle, &trans, portMAX_DELAY);
         }
 
+        BaseDisplayItem *row = display_items_row(items, len, ypos);
         int xpos = 0;
         while (xpos < screen_width) {
-            int drawn_pixels = epaper_draw_x(&driver->screen, buf, xpos, ypos, items, len);
+            int drawn_pixels = epaper_draw_x(&driver->screen, buf, xpos, ypos, row);
             xpos += drawn_pixels;
         }
 
