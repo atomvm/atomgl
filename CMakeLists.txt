@@ -49,6 +49,7 @@ idf_component_register(SRCS
     "ufontlib.c"
     "backlight_gpio.c"
     "image_helpers.c"
+    "shape.c"
     "spng.c"
     "miniz.c"
     PRIV_REQUIRES "libatomvm" "avm_sys" "avm_builtins" "driver" "sdmmc" "vfs" "fatfs"
@@ -56,6 +57,13 @@ idf_component_register(SRCS
 )
 
 target_compile_definitions(${COMPONENT_TARGET} PRIVATE "-DSPNG_USE_MINIZ=1" "-DENABLE_UFONT")
+
+# Not in PRIV_REQUIRES: requirements are collected before -D variables are visible
+if (ATOMGL_PROFILE)
+    target_compile_definitions(${COMPONENT_TARGET} PRIVATE "-DATOMGL_PROFILE")
+    idf_component_get_property(esp_timer_lib esp_timer COMPONENT_LIB)
+    target_link_libraries(${COMPONENT_LIB} PRIVATE ${esp_timer_lib})
+endif()
 
 if (IDF_VERSION_MAJOR EQUAL 4)
     idf_build_set_property(

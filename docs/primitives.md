@@ -24,8 +24,10 @@ specified in pixels, as are sizes. Subpixel or half-pixel values are not allowed
 - `rect` and `text` accept any coordinate and size. Values beyond ±32767 are clamped to that range
   without changing which pixels are drawn on screen, so `{rect, 0, 0, 100000, 100000, Color}`
   still fills the screen. A `rect` with a width or height of 0 or less draws nothing.
-- `image` and `scaled_cropped_image` coordinates, sizes, source offsets and scale factors, and
-  image widths and heights must be within ±32767, or the item is invalid.
+- `image` and `scaled_cropped_image` coordinates, sizes, source offsets and scale factors, image
+  widths and heights, and every value of a shape (coordinates, sizes, radii, thicknesses and
+  polygon points) must be within ±32767, or the item is invalid.
+- Arc angles can be any integer.
 
 ### Invalid Items
 An item with a wrong arity, a value of the wrong type or out of range, or an unknown command is
@@ -61,6 +63,20 @@ performance implications.
 Text can be provided as either an Erlang string (a list) or an Elixir string (a binary). UTF-8
 encoding is supported.
 
+### Shapes
+Shape primitives (`rounded_rect`, `line`, `circle`, `ellipse`, `arc`, `polygon`) paint only the
+pixels inside the shape; pixels in the bounding box but outside the shape show whatever item is
+below in the display list.
+
+`line`, `circle`, `ellipse` and `arc` place their points on pixel centers: the pixel at `{X, Y}` is
+drawn when it is inside. Round edges use the midpoint rule: a pixel at offset `{DX, DY}` from the
+center is inside a radius `R` when `DX * DX + DY * DY < R * R + R`, so a shape of radius `R` is
+`2 * R + 1` pixels across and a circle of radius 1 is a 5 pixel plus. An ellipse applies the same
+rule to each axis. `polygon` vertices lie on pixel corners instead (see below), so a polygon
+outlined with `line` items at the same coordinates is off by half a pixel: the lines along its top
+and left edges cover its first row and column, the lines along its right and bottom edges fall just
+outside it.
+
 ## image
 
 Displays an image at the specified position. The image dimensions are determined by the image tuple
@@ -81,13 +97,19 @@ The item is invalid unless `0 <= SourceX < ImageWidth`, `0 <= SourceY < ImageHei
 factors are at least 1 and `Width` and `Height` are at least 0. `Width` and `Height` are reduced to
 what is left of the image right of and below the source offset, times the scale factor.
 
+`Opts` is a list. `flip_x` or `{flip_x, true}` mirrors the item horizontally, `flip_y` or
+`{flip_y, true}` vertically. Other entries are ignored, and so is an `Opts` that is not a list.
+A flip mirrors the drawn pixels in place, not the whole source image: with `flip_x`, the pixel at
+offset `C` from the item's left edge shows what the unflipped item shows at offset `Width - 1 - C`,
+also when `Width` is not a multiple of the scale factor.
+
 ```erlang
 {scaled_cropped_image,
   X, Y, Width, Height, % bounding rect in pixels
   BackgroundColor, % RGB background color, a "hex color" can be used here, or transparent atom
   SourceX, SourceY, % offset inside the source image from where the image is taken
   XScaleFactor, YScaleFactor, % integer scaling factor, 1 is original, 2 is twice, etc.
-  Opts, % option keyword list, always []: right now no additional options are supported
+  Opts, % option list: [flip_x], [flip_y], [flip_x, flip_y], or [] for none
   Image % image tuple
 }
 ```
@@ -118,6 +140,108 @@ the item invalid.
   TextColor, % RGB text color, a "hex color" can be used here
   BackgroundColor, % RGB background color, a "hex color" can be used here, or transparent atom
   Text % simple text string, UTF-8 can be used, rich text and control characters are not supported
+}
+```
+
+## rounded_rect
+
+Draws a filled rectangle with rounded corners. The corners are quarter circles centered on the
+pixels `Radius` pixels in from each corner, so a `2 * R + 1` square with radius `R` is the same as a
+circle of radius `R`. The radius clamp keeps a straight edge of at least one pixel on every side:
+a 12 pixel high button gets a radius of at most 5.
+
+```erlang
+{rounded_rect,
+  X, Y, Width, Height, % bounding rect in pixels
+  Radius, % corner radius in pixels, >= 0, clamped to (min(Width, Height) - 1) div 2
+  Color % RGB fill color
+}
+```
+
+## line
+
+Draws a straight line of any angle, covering both endpoints.
+
+```erlang
+{line,
+  X1, Y1, X2, Y2, % endpoints in pixels
+  Thickness, % line width in pixels, >= 1
+  Color % RGB line color
+}
+```
+
+A line is `Thickness` pixels thick measured along its minor axis: a line that is wider than it is
+tall covers `Thickness` pixels in every column from `X1` to `X2`, and a taller line `Thickness`
+pixels in every row from `Y1` to `Y2`. A 1 pixel line has one pixel per column (or row) and no
+gaps. With an even thickness the extra pixel goes above (or left of) the ideal line. From thickness
+3 on, both ends get a round cap: a disc `Thickness` pixels across, centered on the line's body, that
+reaches `(Thickness - 1) div 2` pixels past the endpoint and never sticks out above or below the
+line. With an even thickness the body, and so the cap, is centered half a pixel above (or left of)
+the endpoint: a horizontal line of thickness 4 from `{0, 0}` to `{4, 0}` is a 7 by 4 block covering
+columns -1 to 5 and rows -2 to 1. A line with equal endpoints is a disc of radius
+`(Thickness - 1) div 2` on that point, drawn with the midpoint rule (a single pixel for thickness 1
+or 2).
+
+## circle
+
+Draws a filled circle centered on the given point.
+
+```erlang
+{circle,
+  CX, CY, % center in pixels
+  R, % radius in pixels, > 0, the circle is 2 * R + 1 pixels wide
+  Color % RGB fill color
+}
+```
+
+## ellipse
+
+Draws a filled ellipse centered on the given point.
+
+```erlang
+{ellipse,
+  CX, CY, % center in pixels
+  RX, RY, % horizontal and vertical radius in pixels, > 0
+  Color % RGB fill color
+}
+```
+
+## arc
+
+Draws a ring segment (or, with a large thickness, a pie slice).
+
+```erlang
+{arc,
+  CX, CY, % center in pixels
+  R, % outer radius in pixels, > 0
+  Thickness, % ring thickness in pixels, > 0, Thickness >= R draws a pie slice
+  StartDeg, EndDeg, % integer degrees, 0 is 3 o'clock, drawn clockwise from StartDeg to EndDeg
+  Color % RGB color
+}
+```
+
+The arc sweeps `(EndDeg - StartDeg) mod 360` degrees clockwise, so `{0, 90}` is a quarter,
+`{0, -90}` three quarters and `{0, 400}` 40 degrees. Different angles that are equal mod 360, such
+as `{0, 360}` or `{0, -720}`, draw a full ring. `StartDeg == EndDeg` is invalid.
+
+A pixel is drawn when its center is inside the ring (by the midpoint rule, for both the outer
+radius `R` and the inner radius `R - Thickness`) and either its center lies within the sweep, both
+edges included, or one of the two edge rays from the center passes through the pixel. The rays keep
+narrow arcs visible: a 1 degree arc still draws the ring pixels its edges cross. Because both edges
+are included, two arcs that share an edge angle both draw the pixels on it.
+
+## polygon
+
+Draws a filled polygon from a list of vertices, using the even-odd fill rule. Vertices lie on
+pixel corners: the pixel at `{X, Y}` spans `X..X+1` and `Y..Y+1` and is drawn when its center is
+inside, so `[{0, 0}, {10, 0}, {10, 10}, {0, 10}]` fills exactly 10 by 10 pixels, columns and rows 0
+to 9. Unlike the other shapes, which include their edges, a polygon's fill is half-open: polygons
+that share an edge don't overlap and leave no gap between them.
+
+```erlang
+{polygon,
+  Points, % list of 3 to 64 {X, Y} vertices on pixel corners, even-odd fill
+  Color % RGB fill color
 }
 ```
 

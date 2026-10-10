@@ -27,6 +27,8 @@
 
 #include <context.h>
 
+#include "shape.h"
+
 // TODO: deprecated helper, remove this
 static inline term context_make_atom(Context *ctx, AtomString string)
 {
@@ -41,7 +43,8 @@ typedef enum
     PrimitiveImage,
     PrimitiveScaledCroppedImage,
     PrimitiveRect,
-    PrimitiveText
+    PrimitiveText,
+    PrimitiveShape
 } primitive_t;
 
 struct TextData
@@ -62,6 +65,16 @@ struct ImageDataWithSize
     const char *pix;
 };
 
+struct ShapeItemData
+{
+    struct ShapeData *shape;
+    // Rendering scratch, never compared: on outside_row the shape doesn't cover
+    // outside_from..outside_to - 1, so draw_x can skip it there without calling shape_run()
+    int16_t outside_row;
+    int16_t outside_from;
+    int16_t outside_to;
+};
+
 struct BaseDisplayItem
 {
     primitive_t primitive;
@@ -75,6 +88,7 @@ struct BaseDisplayItem
         struct ImageData image_data;
         struct ImageDataWithSize image_data_with_size;
         struct TextData text_data;
+        struct ShapeItemData shape_data;
     } data;
 
     //used just for scaled cropped image
@@ -82,6 +96,8 @@ struct BaseDisplayItem
     int source_y;
     int x_scale;
     int y_scale;
+    bool flip_x;
+    bool flip_y;
 
     bool owns_data;
 
@@ -114,6 +130,121 @@ static inline BaseDisplayItem *display_items_row(BaseDisplayItem items[], size_t
     }
     *link = NULL;
     return head;
+}
+
+static inline uint8_t rgba8888_get_alpha(uint32_t color)
+{
+    return color & 0xFF;
+}
+
+// A scaled_cropped_image shows display pixel px of an axis (counted from the item's x or y)
+// from source pixel px / scale of the cropped image (counted from source_x or source_y). With
+// flip_x or flip_y the axis is mirrored within the part of the item the image covers, which is
+// all of it unless the item is wider or taller than the scaled image. Past the end of the image
+// the edge source pixel repeats.
+struct ScaledCroppedAxis
+{
+    int last_px; // with flip, the last display pixel the image covers, mirrored to 0
+    int scale;
+    int last_src; // the last source pixel of the cropped image
+    bool flip;
+};
+
+static inline void display_items_scaled_cropped_axis_init(struct ScaledCroppedAxis *axis, int len,
+    int src_len, int scale, bool flip)
+{
+    int64_t covered = (int64_t) src_len * scale;
+    axis->last_px = ((len < covered) ? len : (int) covered) - 1;
+    axis->scale = scale;
+    axis->last_src = src_len - 1;
+    axis->flip = flip;
+}
+
+static inline int display_items_scaled_cropped_axis_src(const struct ScaledCroppedAxis *axis,
+    int px)
+{
+    if (axis->flip) {
+        px = axis->last_px - px;
+        // Past the mirrored image: the edge pixel, source pixel 0
+        if (px < 0) {
+            px = 0;
+        }
+    }
+    int src = px / axis->scale;
+    return (src < axis->last_src) ? src : axis->last_src;
+}
+
+// One display row of a scaled_cropped_image: its source row and the mapping of its columns.
+struct ScaledCroppedRow
+{
+    const uint32_t *pixels; // the source row, from source_x
+    struct ScaledCroppedAxis cols;
+};
+
+static inline void display_items_scaled_cropped_row_init(struct ScaledCroppedRow *row,
+    const BaseDisplayItem *item, int row_px)
+{
+    const struct ImageDataWithSize *img = &item->data.image_data_with_size;
+    struct ScaledCroppedAxis rows;
+    display_items_scaled_cropped_axis_init(&rows, item->height, img->height - item->source_y,
+        item->y_scale, item->flip_y);
+    int src_row = display_items_scaled_cropped_axis_src(&rows, row_px);
+    row->pixels = ((const uint32_t *) img->pix) + (item->source_y + src_row) * img->width
+        + item->source_x;
+    display_items_scaled_cropped_axis_init(&row->cols, item->width, img->width - item->source_x,
+        item->x_scale, item->flip_x);
+}
+
+static inline bool display_items_shape_outside_run(const BaseDisplayItem *item, int xpos, int ypos,
+    int *run)
+{
+    const struct ShapeItemData *data = &item->data.shape_data;
+    if (ypos == data->outside_row && xpos >= data->outside_from && xpos < data->outside_to) {
+        *run = data->outside_to - xpos;
+        return true;
+    }
+    return false;
+}
+
+static inline void display_items_shape_remember_outside(BaseDisplayItem *item, int xpos, int ypos,
+    int run)
+{
+    if (ypos < 0 || ypos > INT16_MAX || xpos < 0 || run > INT16_MAX - xpos) {
+        return;
+    }
+    struct ShapeItemData *data = &item->data.shape_data;
+    data->outside_row = (int16_t) ypos;
+    data->outside_from = (int16_t) xpos;
+    data->outside_to = (int16_t) (xpos + run);
+}
+
+// The source pixel shown at display column col_px of the row, and in *run how many display
+// columns from col_px, up to end, show that same source pixel.
+static inline __attribute__((always_inline)) const uint32_t *display_items_scaled_cropped_row_run(
+    const struct ScaledCroppedRow *row, int col_px, int end, int *run)
+{
+    const struct ScaledCroppedAxis *cols = &row->cols;
+    int src;
+    int left;
+    if (!cols->flip) {
+        src = col_px / cols->scale;
+        left = (src + 1) * cols->scale - col_px;
+        if (src >= cols->last_src) {
+            src = cols->last_src;
+            left = end - col_px;
+        }
+    } else {
+        int px = cols->last_px - col_px;
+        if (px >= 0) {
+            src = px / cols->scale;
+            left = px - src * cols->scale + 1;
+        } else {
+            src = 0;
+            left = end - col_px;
+        }
+    }
+    *run = (left < end - col_px) ? left : end - col_px;
+    return row->pixels + src;
 }
 
 void display_items_init_item(BaseDisplayItem *item, term req, Context *ctx);
