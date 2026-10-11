@@ -51,6 +51,8 @@
 #include <math.h>
 
 #include "display_common.h"
+#include "display_damage.h"
+#include "display_frame.h"
 #include "display_task.h"
 #include "mono_draw.h"
 #include "spi_display.h"
@@ -68,6 +70,7 @@ struct MemoryLCDDriver
     Context *ctx;
 
     struct MonoScreen screen;
+    struct DisplayFrame frame;
 
     uint8_t *pixels;
     uint8_t *dma_out;
@@ -92,15 +95,14 @@ static inline int next_vcom(struct MemoryLCDDriver *driver)
     return current_vcom;
 }
 
-static void do_update(Context *ctx, term display_list)
+// Returns true when `message` has been retained as the frame's message.
+static bool do_update(struct MemoryLCDDriver *driver, Message *message, term display_list, Context *ctx)
 {
-    BaseDisplayItem *items;
-    size_t len;
-    if (UNLIKELY(display_items_new_list(display_list, &items, &len, ctx) != DisplayItemsOk)) {
-        return;
+    struct DisplayUpdate update;
+    if (!display_frame_begin_update(&driver->frame, display_list, ctx, &update)) {
+        return false;
     }
 
-    struct MemoryLCDDriver *driver = MEMORY_LCD_DRIVER_FROM_CTX(ctx);
     int screen_width = driver->screen.w;
     int screen_height = driver->screen.h;
 
@@ -110,15 +112,17 @@ static void do_update(Context *ctx, term display_list)
     spi_device_acquire_bus(driver->spi_disp.handle, portMAX_DELAY);
     bool transaction_in_progress = false;
 
+    // Lines are addressed individually.
     for (int ypos = 0; ypos < screen_height; ypos++) {
-        if (!driver->dma_out && transaction_in_progress) {
-            spi_transaction_t *trans = NULL;
-            spi_device_get_trans_result(driver->spi_disp.handle, &trans, portMAX_DELAY);
+        int x_start;
+        int x_end;
+        if (!display_damage_rows_span(&update.damage, ypos, ypos + 1, &x_start, &x_end)) {
+            continue;
         }
 
         memset(buf + 2, 0xFF, DISPLAY_WIDTH / 8);
 
-        BaseDisplayItem *row = display_items_row(items, len, ypos);
+        BaseDisplayItem *row = display_items_row(update.items, update.items_len, ypos);
         int xpos = 0;
         while (xpos < screen_width) {
             int drawn_pixels = mono_draw_x(&driver->screen, buf + 2, xpos, ypos, row);
@@ -130,21 +134,24 @@ static void do_update(Context *ctx, term display_list)
         buf[2 + DISPLAY_WIDTH / 8] = 0;
         buf[2 + DISPLAY_WIDTH / 8 + 1] = 0;
 
-        if (driver->dma_out) {
-            if (transaction_in_progress) {
-                spi_transaction_t *trans = NULL;
-                spi_device_get_trans_result(driver->spi_disp.handle, &trans, portMAX_DELAY);
-            }
-            void *tmp = driver->pixels;
-            driver->pixels = driver->dma_out;
-            buf = driver->pixels;
-            driver->dma_out = tmp;
-
-            spi_display_dma_write(&driver->spi_disp, memsize, driver->dma_out);
-        } else {
-            spi_display_dma_write(&driver->spi_disp, memsize, buf);
+        if (transaction_in_progress) {
+            spi_transaction_t *trans = NULL;
+            spi_device_get_trans_result(driver->spi_disp.handle, &trans, portMAX_DELAY);
         }
+        uint8_t *tmp = driver->pixels;
+        driver->pixels = driver->dma_out;
+        buf = driver->pixels;
+        driver->dma_out = tmp;
 
+        spi_display_dma_write(&driver->spi_disp, memsize, driver->dma_out);
+        transaction_in_progress = true;
+    }
+
+    if (!transaction_in_progress) {
+        // Nothing changed: still alternate VCOM, as every update used to.
+        buf[0] = next_vcom(driver);
+        buf[1] = 0;
+        spi_display_dma_write(&driver->spi_disp, 2, buf);
         transaction_in_progress = true;
     }
 
@@ -154,7 +161,9 @@ static void do_update(Context *ctx, term display_list)
     }
 
     spi_device_release_bus(driver->spi_disp.handle);
-    display_items_delete(items, len);
+    display_frame_commit(&driver->frame, &update, message, ctx->global);
+
+    return true;
 }
 
 static bool process_message(Message *message, Context *ctx)
@@ -171,11 +180,16 @@ static bool process_message(Message *message, Context *ctx)
     }
     term cmd = term_get_tuple_element(req, 0);
 
+    struct MemoryLCDDriver *driver = MEMORY_LCD_DRIVER_FROM_CTX(ctx);
+
     if (cmd == context_make_atom(ctx, "\x6"
                                       "update")) {
+        if (term_get_tuple_arity(req) != 2) {
+            fprintf(stderr, "display: invalid update request\n");
+            return false;
+        }
         term display_list = term_get_tuple_element(req, 1);
-        do_update(ctx, display_list);
-        return false;
+        return do_update(driver, message, display_list, ctx);
 
     } else if (cmd == globalcontext_make_atom(ctx->global, "\xA" "load_image")) {
         handle_load_image(req, gen_message.ref, gen_message.pid, ctx);
@@ -232,6 +246,7 @@ static void display_init(Context *ctx, term opts)
     driver->screen.w = width;
     driver->screen.h = height;
     driver->vcom = 0;
+    display_frame_init(&driver->frame, width, height);
 
     driver->pixels = heap_caps_malloc(memsize, MALLOC_CAP_DMA);
     if (UNLIKELY(!driver->pixels)) {
