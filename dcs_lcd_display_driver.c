@@ -179,7 +179,7 @@ static void do_update(Context *ctx, term display_list)
         BaseDisplayItem *row = display_items_row(items, len, ypos);
         int xpos = 0;
         while (xpos < screen_width) {
-            int drawn_pixels = dcs_lcd_draw_x(&driver->screen, xpos, ypos, row);
+            int drawn_pixels = dcs_lcd_draw_x(&driver->screen, xpos, ypos, screen_width, row);
             xpos += drawn_pixels;
         }
 #ifdef ATOMGL_PROFILE

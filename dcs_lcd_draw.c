@@ -247,9 +247,9 @@ int dcs_lcd_draw_scaled_cropped_img_x(const struct DCSLCDScreen *screen,
 }
 
 int dcs_lcd_draw_x(const struct DCSLCDScreen *screen,
-    int xpos, int ypos, BaseDisplayItem *row)
+    int xpos, int ypos, int x_end, BaseDisplayItem *row)
 {
-    int line_len = screen->w - xpos;
+    int line_len = x_end - xpos;
     int transparent_run = INT_MAX;
 
     for (BaseDisplayItem *item = row; item != NULL; item = item->next) {

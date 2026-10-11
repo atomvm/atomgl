@@ -40,6 +40,6 @@ int dcs_lcd_draw_scaled_cropped_img_x(const struct DCSLCDScreen *screen,
     int xpos, int ypos, int max_line_len, BaseDisplayItem *item);
 
 int dcs_lcd_draw_x(const struct DCSLCDScreen *screen,
-    int xpos, int ypos, BaseDisplayItem *row);
+    int xpos, int ypos, int x_end, BaseDisplayItem *row);
 
 #endif
