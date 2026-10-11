@@ -29,12 +29,20 @@
 #include <context.h>
 #include <mailbox.h>
 
+#include "display_frame.h"
+
+// Without messages for this long the retained display list is released to
+// give its memory back; the next update repaints the whole screen.
+#define DISPLAY_IDLE_TIMEOUT_MS 10000
+
 struct DisplayTaskArgs
 {
     QueueHandle_t messages_queue;
     // Handles one message. Returns true when the driver keeps the message
     // (and disposes it itself later), false when the task must dispose it.
     bool (*process_message_fn)(Message *message, Context *ctx);
+    // NULL when the driver keeps no display list between updates.
+    struct DisplayFrame *frame;
     Context *ctx;
 };
 

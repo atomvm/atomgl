@@ -343,9 +343,11 @@ items = [
 
 Every `update` is compared with the previous one and only the areas that changed are rendered and
 sent to the panel, so sending the same list again costs nothing. The first update after opening the
-display paints the whole screen. Pixels not covered by any item are black on the DCS LCDs, so include
-a background rectangle as the last item for any other background color. The `draw_buffer` command
-paints outside of the display list; the area it touches is repainted by the next `update`.
+display paints the whole screen, and so does the first one after 10 seconds without messages: the
+driver releases the list it keeps to give the memory back, which costs applications refreshing less
+often one full repaint per update. Pixels not covered by any item are black on the DCS LCDs, so
+include a background rectangle as the last item for any other background color. The `draw_buffer`
+command paints outside of the display list; the area it touches is repainted by the next `update`.
 
 Image pixels are never compared: an image counts as changed whenever it comes from a different
 binary, so keep and reuse the same binary across updates. Text rendered with a ufont and binaries

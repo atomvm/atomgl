@@ -70,6 +70,10 @@ void display_frame_commit(struct DisplayFrame *frame, struct DisplayUpdate *upda
 // update repaints everything.
 void display_frame_abort(struct DisplayFrame *frame, struct DisplayUpdate *update);
 
+// Gives the memory of the retained list back; the next update repaints
+// everything, as the first one does.
+void display_frame_release(struct DisplayFrame *frame, GlobalContext *global);
+
 // For screen content changed outside of the display list (e.g. a raw buffer
 // was written).
 void display_frame_invalidate_rect(struct DisplayFrame *frame, int x, int y, int width, int height);

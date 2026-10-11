@@ -67,13 +67,21 @@ static void dispose_message(Message *message, GlobalContext *global)
     END_WITH_STACK_HEAP(temp_heap, global);
 }
 
+static void delete_content(struct DisplayFrame *frame, GlobalContext *global)
+{
+    display_items_delete(frame->items, frame->items_len);
+    frame->items = NULL;
+    frame->items_len = 0;
+    if (frame->message != NULL) {
+        dispose_message(frame->message, global);
+        frame->message = NULL;
+    }
+}
+
 void display_frame_commit(struct DisplayFrame *frame, struct DisplayUpdate *update,
     Message *message, GlobalContext *global)
 {
-    display_items_delete(frame->items, frame->items_len);
-    if (frame->message != NULL) {
-        dispose_message(frame->message, global);
-    }
+    delete_content(frame, global);
 
     frame->items = update->items;
     frame->items_len = update->items_len;
@@ -90,6 +98,12 @@ void display_frame_abort(struct DisplayFrame *frame, struct DisplayUpdate *updat
     update->items = NULL;
     update->items_len = 0;
 
+    display_damage_add_all(&frame->pending);
+}
+
+void display_frame_release(struct DisplayFrame *frame, GlobalContext *global)
+{
+    delete_content(frame, global);
     display_damage_add_all(&frame->pending);
 }
 

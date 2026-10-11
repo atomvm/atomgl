@@ -239,6 +239,7 @@ static void display_init(Context *ctx, term opts)
 
     driver->display_args.messages_queue = xQueueCreate(32, sizeof(Message *));
     driver->display_args.process_message_fn = process_message;
+    driver->display_args.frame = &driver->frame;
     driver->display_args.ctx = ctx;
     ctx->platform_data = &driver->display_args;
 
