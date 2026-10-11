@@ -40,6 +40,10 @@ int mono_draw_rect_x(const struct MonoScreen *screen,
     uint8_t *line_buf, int xpos, int ypos, int max_line_len,
     BaseDisplayItem *item);
 
+int mono_draw_shape_x(const struct MonoScreen *screen,
+    uint8_t *line_buf, int xpos, int ypos, int max_line_len,
+    BaseDisplayItem *item, int *outside_run);
+
 int mono_draw_text_x(const struct MonoScreen *screen,
     uint8_t *line_buf, int xpos, int ypos, int max_line_len,
     BaseDisplayItem *item);

@@ -20,6 +20,7 @@
 
 #include "mono_draw.h"
 
+#include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -113,7 +114,7 @@ int mono_draw_image_x(const struct MonoScreen *screen,
 
     for (int j = xpos - x; j < width; j++) {
         uint32_t img_pixel = READ_32_UNALIGNED(pixels);
-        if ((*pixels >> 24) & 0xFF) {
+        if (rgba8888_get_alpha(img_pixel) != 0) {
             uint8_t r = img_pixel >> 24;
             uint8_t g = (img_pixel >> 16) & 0xFF;
             uint8_t b = (img_pixel >> 8) & 0xFF;
@@ -125,8 +126,14 @@ int mono_draw_image_x(const struct MonoScreen *screen,
             int c = get_color(xpos + drawn_pixels, ypos, bgcolor_r, bgcolor_g, bgcolor_b);
             mono_draw_pixel_x(screen, line_buf, xpos + drawn_pixels, c);
 
-        } else {
+        } else if (drawn_pixels > 0) {
             return drawn_pixels;
+        } else {
+            int run = 1;
+            while (j + run < width && rgba8888_get_alpha(READ_32_UNALIGNED(pixels + run)) == 0) {
+                run++;
+            }
+            return -run;
         }
         drawn_pixels++;
         pixels++;
@@ -160,6 +167,27 @@ int mono_draw_rect_x(const struct MonoScreen *screen,
     }
 
     return drawn_pixels;
+}
+
+int mono_draw_shape_x(const struct MonoScreen *screen,
+    uint8_t *line_buf, int xpos, int ypos, int max_line_len,
+    BaseDisplayItem *item,
+    int *outside_run)
+{
+    if (display_items_shape_outside_run(item, xpos, ypos, outside_run)) {
+        return 0;
+    }
+    bool inside;
+    int run = shape_run(item->data.shape_data.shape, xpos, ypos, &inside);
+    if (!inside) {
+        display_items_shape_remember_outside(item, xpos, ypos, run);
+        *outside_run = run;
+        return 0;
+    }
+    if (run > max_line_len) {
+        run = max_line_len;
+    }
+    return mono_draw_rect_x(screen, line_buf, xpos, ypos, run, item);
 }
 
 int mono_draw_text_x(const struct MonoScreen *screen,
@@ -223,8 +251,14 @@ int mono_draw_text_x(const struct MonoScreen *screen,
             int c = get_color(xpos + drawn_pixels, ypos, bgcolor_r, bgcolor_g, bgcolor_b);
             mono_draw_pixel_x(screen, line_buf, xpos + drawn_pixels, c);
 
-        } else {
+        } else if (drawn_pixels > 0) {
             return drawn_pixels;
+        } else {
+            int run = 1;
+            while (j + run < width && (fontdata[((unsigned char) text[(j + run) / CHAR_WIDTH]) * 16 + ypos - y] & (1 << (7 - (j + run) % CHAR_WIDTH))) == 0) {
+                run++;
+            }
+            return -run;
         }
         drawn_pixels++;
     }
@@ -256,42 +290,48 @@ int mono_draw_scaled_cropped_img_x(const struct MonoScreen *screen,
     }
 
     int width = item->width;
-    const char *data = item->data.image_data_with_size.pix;
 
     int drawn_pixels = 0;
-
-    int y_scale = item->y_scale;
-    int x_scale = item->x_scale;
-    int img_width = item->data.image_data_with_size.width;
-
-    int source_x = item->source_x;
-    int source_y = item->source_y;
-
-    uint32_t *pixels = ((uint32_t *) data) + (source_y + ((ypos - y) / y_scale)) * img_width + source_x + ((xpos - x) / x_scale);
 
     if (width > xpos - x + max_line_len) {
         width = xpos - x + max_line_len;
     }
 
-    for (int j = xpos - x; j < width; j++) {
-        uint32_t img_pixel = READ_32_UNALIGNED(pixels);
-        if ((*pixels >> 24) & 0xFF) {
+    struct ScaledCroppedRow src;
+    display_items_scaled_cropped_row_init(&src, item, ypos - y);
+
+    int j = xpos - x;
+    while (j < width) {
+        int run;
+        uint32_t img_pixel = READ_32_UNALIGNED(display_items_scaled_cropped_row_run(&src, j, width, &run));
+        if (rgba8888_get_alpha(img_pixel) != 0) {
             uint8_t r = img_pixel >> 24;
             uint8_t g = (img_pixel >> 16) & 0xFF;
             uint8_t b = (img_pixel >> 8) & 0xFF;
-
-            int c = get_color(xpos + drawn_pixels, ypos, r, g, b);
-            mono_draw_pixel_x(screen, line_buf, xpos + drawn_pixels, c);
-
+            for (int k = 0; k < run; k++) {
+                int c = get_color(xpos + drawn_pixels, ypos, r, g, b);
+                mono_draw_pixel_x(screen, line_buf, xpos + drawn_pixels, c);
+                drawn_pixels++;
+            }
         } else if (visible_bg) {
-            int c = get_color(xpos + drawn_pixels, ypos, bgcolor_r, bgcolor_g, bgcolor_b);
-            mono_draw_pixel_x(screen, line_buf, xpos + drawn_pixels, c);
-
-        } else {
+            for (int k = 0; k < run; k++) {
+                int c = get_color(xpos + drawn_pixels, ypos, bgcolor_r, bgcolor_g, bgcolor_b);
+                mono_draw_pixel_x(screen, line_buf, xpos + drawn_pixels, c);
+                drawn_pixels++;
+            }
+        } else if (drawn_pixels > 0) {
             return drawn_pixels;
+        } else {
+            int transparent = run;
+            j += run;
+            while (j < width
+                && rgba8888_get_alpha(READ_32_UNALIGNED(display_items_scaled_cropped_row_run(&src, j, width, &run))) == 0) {
+                transparent += run;
+                j += run;
+            }
+            return -transparent;
         }
-        drawn_pixels++;
-        pixels = ((uint32_t *) data) + (source_y + ((ypos - y) / y_scale)) * img_width + source_x + ((j + 1) / x_scale);
+        j += run;
     }
 
     return drawn_pixels;
@@ -302,7 +342,7 @@ int mono_draw_x(const struct MonoScreen *screen,
     BaseDisplayItem *row)
 {
     int line_len = screen->w - xpos;
-    bool below = false;
+    int transparent_run = INT_MAX;
 
     for (BaseDisplayItem *item = row; item != NULL; item = item->next) {
         if (xpos < item->x) {
@@ -316,8 +356,9 @@ int mono_draw_x(const struct MonoScreen *screen,
             continue;
         }
 
-        int max_line_len = below ? 1 : line_len;
+        int max_line_len = (line_len < transparent_run) ? line_len : transparent_run;
 
+        int run = 1;
         int drawn_pixels = 0;
         switch (item->primitive) {
             case PrimitiveImage:
@@ -340,16 +381,26 @@ int mono_draw_x(const struct MonoScreen *screen,
                 drawn_pixels = mono_draw_text_x(screen, line_buf, xpos, ypos, max_line_len, item);
                 break;
 
+            case PrimitiveShape:
+                drawn_pixels = mono_draw_shape_x(screen, line_buf, xpos, ypos, max_line_len, item, &run);
+                break;
+
             default: {
                 fprintf(stderr, "unexpected display list command.\n");
             }
         }
 
-        if (drawn_pixels != 0) {
+        if (drawn_pixels > 0) {
             return drawn_pixels;
         }
 
-        below = true;
+        // Transparent for run pixels: images and text return it negated, shapes set it
+        if (drawn_pixels < 0) {
+            run = -drawn_pixels;
+        }
+        if (run < transparent_run) {
+            transparent_run = run;
+        }
     }
 
     return 1;

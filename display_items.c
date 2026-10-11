@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <defaultatoms.h>
 #include <interop.h>
 #include <utils.h>
 
@@ -96,6 +97,11 @@ static bool get_coord_element(term req, int index, int *out)
     return get_bounded_element(req, index, -DISPLAY_ITEMS_COORD_LIMIT, DISPLAY_ITEMS_COORD_LIMIT, out);
 }
 
+static bool get_shape_value_element(term req, int index, int *out)
+{
+    return get_bounded_element(req, index, -SHAPE_VALUE_LIMIT, SHAPE_VALUE_LIMIT, out);
+}
+
 static bool get_color_element(term req, int index, uint32_t *out)
 {
     avm_int64_t color;
@@ -115,6 +121,12 @@ static bool get_bgcolor_element(term req, int index, uint32_t *out, Context *ctx
     }
 
     return get_color_element(req, index, out);
+}
+
+static int normalize_deg(avm_int64_t deg)
+{
+    deg %= 360;
+    return (int) ((deg < 0) ? deg + 360 : deg);
 }
 
 static bool get_rgba8888_image(term img, struct ImageDataWithSize *out, Context *ctx)
@@ -193,10 +205,175 @@ static const char *init_scaled_cropped_image_item(BaseDisplayItem *item, term re
         item->height = max_height;
     }
 
+    term flip_x = globalcontext_make_atom(ctx->global, ATOM_STR("\x6", "flip_x"));
+    term flip_y = globalcontext_make_atom(ctx->global, ATOM_STR("\x6", "flip_y"));
+    term opts = term_get_tuple_element(req, 10);
+    while (term_is_nonempty_list(opts)) {
+        term opt = term_get_list_head(opts);
+        if (term_is_tuple(opt) && term_get_tuple_arity(opt) == 2
+            && term_get_tuple_element(opt, 1) == TRUE_ATOM) {
+            opt = term_get_tuple_element(opt, 0);
+        }
+        if (opt == flip_x) {
+            item->flip_x = true;
+        } else if (opt == flip_y) {
+            item->flip_y = true;
+        }
+        opts = term_get_list_tail(opts);
+    }
+
     item->primitive = PrimitiveScaledCroppedImage;
     item->data.image_data_with_size = img;
 
     return NULL;
+}
+
+static const char *init_shape_item(BaseDisplayItem *item, struct ShapeData *shape, uint32_t color)
+{
+    if (IS_NULL_PTR(shape)) {
+        return "out of memory";
+    }
+    item->primitive = PrimitiveShape;
+    item->brcolor = color;
+    item->data.shape_data.shape = shape;
+    shape_bounds(shape, &item->x, &item->y, &item->width, &item->height);
+
+    return NULL;
+}
+
+static const char *init_rounded_rect_item(BaseDisplayItem *item, term req)
+{
+    int x, y, width, height, radius;
+    uint32_t color;
+    if (UNLIKELY(term_get_tuple_arity(req) != 7)) {
+        return "wrong arity";
+    }
+    if (UNLIKELY(!get_shape_value_element(req, 1, &x) || !get_shape_value_element(req, 2, &y)
+            || !get_bounded_element(req, 3, 1, SHAPE_VALUE_LIMIT, &width)
+            || !get_bounded_element(req, 4, 1, SHAPE_VALUE_LIMIT, &height)
+            || !get_bounded_element(req, 5, 0, SHAPE_VALUE_LIMIT, &radius)
+            || !get_color_element(req, 6, &color))) {
+        return "bad position, size, radius or color";
+    }
+
+    return init_shape_item(item, shape_new_rounded_rect(x, y, width, height, radius), color);
+}
+
+static const char *init_circle_item(BaseDisplayItem *item, term req)
+{
+    int cx, cy, radius;
+    uint32_t color;
+    if (UNLIKELY(term_get_tuple_arity(req) != 5)) {
+        return "wrong arity";
+    }
+    if (UNLIKELY(!get_shape_value_element(req, 1, &cx) || !get_shape_value_element(req, 2, &cy)
+            || !get_bounded_element(req, 3, 1, SHAPE_VALUE_LIMIT, &radius)
+            || !get_color_element(req, 4, &color))) {
+        return "bad center, radius or color";
+    }
+
+    return init_shape_item(item, shape_new_ellipse(cx, cy, radius, radius), color);
+}
+
+static const char *init_ellipse_item(BaseDisplayItem *item, term req)
+{
+    int cx, cy, rx, ry;
+    uint32_t color;
+    if (UNLIKELY(term_get_tuple_arity(req) != 6)) {
+        return "wrong arity";
+    }
+    if (UNLIKELY(!get_shape_value_element(req, 1, &cx) || !get_shape_value_element(req, 2, &cy)
+            || !get_bounded_element(req, 3, 1, SHAPE_VALUE_LIMIT, &rx)
+            || !get_bounded_element(req, 4, 1, SHAPE_VALUE_LIMIT, &ry)
+            || !get_color_element(req, 5, &color))) {
+        return "bad center, radii or color";
+    }
+
+    return init_shape_item(item, shape_new_ellipse(cx, cy, rx, ry), color);
+}
+
+static const char *init_line_item(BaseDisplayItem *item, term req)
+{
+    int x1, y1, x2, y2, thickness;
+    uint32_t color;
+    if (UNLIKELY(term_get_tuple_arity(req) != 7)) {
+        return "wrong arity";
+    }
+    if (UNLIKELY(!get_shape_value_element(req, 1, &x1) || !get_shape_value_element(req, 2, &y1)
+            || !get_shape_value_element(req, 3, &x2) || !get_shape_value_element(req, 4, &y2)
+            || !get_bounded_element(req, 5, 1, SHAPE_VALUE_LIMIT, &thickness)
+            || !get_color_element(req, 6, &color))) {
+        return "bad points, thickness or color";
+    }
+
+    return init_shape_item(item, shape_new_line(x1, y1, x2, y2, thickness), color);
+}
+
+static const char *init_arc_item(BaseDisplayItem *item, term req)
+{
+    int cx, cy, radius, thickness;
+    avm_int64_t start, end;
+    uint32_t color;
+    if (UNLIKELY(term_get_tuple_arity(req) != 8)) {
+        return "wrong arity";
+    }
+    if (UNLIKELY(!get_shape_value_element(req, 1, &cx) || !get_shape_value_element(req, 2, &cy)
+            || !get_bounded_element(req, 3, 1, SHAPE_VALUE_LIMIT, &radius)
+            || !get_bounded_element(req, 4, 1, SHAPE_VALUE_LIMIT, &thickness)
+            || !get_int_element(req, 5, &start) || !get_int_element(req, 6, &end) || start == end
+            || !get_color_element(req, 7, &color))) {
+        return "bad center, radius, thickness, angles or color";
+    }
+
+    int start_deg = normalize_deg(start);
+    int end_deg = normalize_deg(end);
+    if (start_deg == end_deg) {
+        end_deg += 360;
+    }
+
+    return init_shape_item(item, shape_new_arc(cx, cy, radius, thickness, start_deg, end_deg), color);
+}
+
+static const char *init_polygon_item(BaseDisplayItem *item, term req)
+{
+    uint32_t color;
+    if (UNLIKELY(term_get_tuple_arity(req) != 3)) {
+        return "wrong arity";
+    }
+    term points = term_get_tuple_element(req, 1);
+    int proper;
+    int points_len = term_list_length(points, &proper);
+    if (UNLIKELY(!proper || points_len < 3 || !get_color_element(req, 2, &color))) {
+        return "bad points or color";
+    }
+    if (UNLIKELY(points_len > SHAPE_POLYGON_MAX_POINTS)) {
+        return "too many points";
+    }
+
+    struct ShapeData *shape = shape_polygon_begin(points_len);
+    if (IS_NULL_PTR(shape)) {
+        return "out of memory";
+    }
+    for (int i = 0; i < points_len; i++) {
+        term point = term_get_list_head(points);
+        int x, y;
+        if (UNLIKELY(!term_is_tuple(point) || term_get_tuple_arity(point) != 2
+                || !get_shape_value_element(point, 0, &x) || !get_shape_value_element(point, 1, &y))) {
+            shape_destroy(shape);
+            return "bad points or color";
+        }
+        if (UNLIKELY(!shape_polygon_add_point(shape, x, y))) {
+            shape_destroy(shape);
+            return "bad points or color";
+        }
+        points = term_get_list_tail(points);
+    }
+    if (UNLIKELY(!shape_polygon_end(shape))) {
+        shape_destroy(shape);
+        return "bad points or color";
+    }
+
+    return init_shape_item(item, shape, color);
 }
 
 static int clamp_coord(avm_int64_t v)
@@ -385,6 +562,24 @@ static const char *init_item(BaseDisplayItem *item, term req, Context *ctx)
     } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x4", "text"))) {
         reason = init_text_item(item, req, ctx);
 
+    } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\xC", "rounded_rect"))) {
+        reason = init_rounded_rect_item(item, req);
+
+    } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x6", "circle"))) {
+        reason = init_circle_item(item, req);
+
+    } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x7", "ellipse"))) {
+        reason = init_ellipse_item(item, req);
+
+    } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x4", "line"))) {
+        reason = init_line_item(item, req);
+
+    } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x3", "arc"))) {
+        reason = init_arc_item(item, req);
+
+    } else if (cmd == globalcontext_make_atom(ctx->global, ATOM_STR("\x7", "polygon"))) {
+        reason = init_polygon_item(item, req);
+
     } else {
         reason = "unknown command";
     }
@@ -483,6 +678,10 @@ void display_items_delete(BaseDisplayItem items[], size_t items_len)
 
             case PrimitiveText:
                 free((char *) item->data.text_data.text);
+                break;
+
+            case PrimitiveShape:
+                shape_destroy(item->data.shape_data.shape);
                 break;
 
             default: {

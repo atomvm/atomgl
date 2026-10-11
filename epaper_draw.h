@@ -35,6 +35,10 @@ int epaper_draw_rect_x(const struct EpaperScreen *screen,
     uint8_t *line_buf, int xpos, int ypos, int max_line_len,
     BaseDisplayItem *item);
 
+int epaper_draw_shape_x(const struct EpaperScreen *screen,
+    uint8_t *line_buf, int xpos, int ypos, int max_line_len,
+    BaseDisplayItem *item, int *outside_run);
+
 int epaper_draw_text_x(const struct EpaperScreen *screen,
     uint8_t *line_buf, int xpos, int ypos, int max_line_len,
     BaseDisplayItem *item);

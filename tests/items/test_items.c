@@ -34,6 +34,9 @@
 #include "dcs_lcd_draw.h"
 #include "dcs_lcd_screen.h"
 #include "display_items.h"
+#include "epaper_color.h"
+#include "epaper_draw.h"
+#include "mono_draw.h"
 
 #include "alloc_counter.h"
 
@@ -156,6 +159,18 @@ static term rgba(avm_int_t w, avm_int_t h, term bin)
     return tuple(4, atom("rgba8888"), term_from_int(w), term_from_int(h), bin);
 }
 
+static term flips(bool flip_x, bool flip_y)
+{
+    term opts = term_nil();
+    if (flip_y) {
+        opts = cons(tuple(2, atom("flip_y"), TRUE_ATOM), opts);
+    }
+    if (flip_x) {
+        opts = cons(tuple(2, atom("flip_x"), TRUE_ATOM), opts);
+    }
+    return opts;
+}
+
 static term sci(avm_int_t w, avm_int_t h, avm_int_t sx, avm_int_t sy, avm_int_t xs, avm_int_t ys,
     term opts, term img)
 {
@@ -267,14 +282,15 @@ static void test_scaled_cropped_image_invalid(void)
     term ok_img = rgba(4, 2, pixels(32));
 
     for (int sy = 2; sy <= 4; sy++) {
+        expect_invalid("source_y >= image height, flip_y", sci(4, 2, 0, sy, 1, 1, flips(false, true), ok_img));
         expect_invalid("source_y >= image height", sci(4, 2, 0, sy, 1, 1, term_nil(), ok_img));
     }
-    expect_invalid("source_y huge", sci(4, 2, 0, 100000000, 1, 1, term_nil(), ok_img));
-    expect_invalid("source_x >= image width", sci(4, 2, 4, 0, 1, 1, term_nil(), ok_img));
+    expect_invalid("source_y huge, flip_y", sci(4, 2, 0, 100000000, 1, 1, flips(false, true), ok_img));
+    expect_invalid("source_x >= image width, flip_x", sci(4, 2, 4, 0, 1, 1, flips(true, false), ok_img));
     expect_invalid("source_x -1", sci(4, 1, -1, 0, 1, 1, term_nil(), ok_img));
     expect_invalid("source_y -1", sci(4, 2, 0, -1, 1, 1, term_nil(), ok_img));
     expect_invalid("image height 0, empty binary", sci(4, 1, 0, 0, 1, 1, term_nil(), rgba(4, 0, pixels(0))));
-    expect_invalid("image width 0", sci(4, 1, 0, 0, 1, 1, term_nil(), rgba(0, 1, pixels(0))));
+    expect_invalid("image width 0, flip_x", sci(4, 1, 0, 0, 1, 1, flips(true, false), rgba(0, 1, pixels(0))));
     expect_invalid("image width -1", sci(4, 1, 0, 0, 1, 1, term_nil(), rgba(-1, 1, pixels(16))));
     expect_invalid("binary shorter than W*H*4", sci(4, 4, 0, 0, 1, 1, term_nil(), rgba(4, 4, pixels(16))));
     expect_invalid("binary one byte short", sci(4, 2, 0, 0, 1, 1, term_nil(), rgba(4, 2, pixels(31))));
@@ -343,11 +359,82 @@ static void test_image_invalid(void)
     }
 }
 
-static void test_command_invalid(void)
+static void test_shape_invalid(void)
 {
+    term c = term_from_int(0xFF0000);
+
     expect_invalid("not a tuple", term_from_int(3));
     expect_invalid("empty tuple", tuple(0));
     expect_invalid("unknown command", tuple(2, atom("triangle"), term_from_int(1)));
+    expect_invalid("circle with ellipse arity",
+        tuple(6, atom("circle"), term_from_int(10), term_from_int(10), term_from_int(5), term_from_int(5), c));
+    expect_invalid("ellipse with circle arity", tuple(5, atom("ellipse"), term_from_int(10), term_from_int(10), term_from_int(5), c));
+    expect_invalid("circle radius above limit",
+        tuple(5, atom("circle"), term_from_int(10), term_from_int(10), term_from_int(SHAPE_VALUE_LIMIT + 1), c));
+    expect_invalid("line thickness 0",
+        tuple(7, atom("line"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(0), c));
+    expect_invalid("rounded_rect color not an integer",
+        tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(2), atom("red")));
+    expect_invalid("rounded_rect radius above limit",
+        tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(SHAPE_VALUE_LIMIT + 1), c));
+    expect_invalid("arc equal angles",
+        tuple(8, atom("arc"), term_from_int(20), term_from_int(20), term_from_int(10), term_from_int(3), term_from_int(45), term_from_int(45), c));
+    expect_invalid("arc angle not an integer",
+        tuple(8, atom("arc"), term_from_int(20), term_from_int(20), term_from_int(10), term_from_int(3), atom("a"), term_from_int(45), c));
+    expect_invalid("arc thickness above limit",
+        tuple(8, atom("arc"), term_from_int(20), term_from_int(20), term_from_int(10), term_from_int(SHAPE_VALUE_LIMIT + 1),
+            term_from_int(0), term_from_int(90), c));
+
+    term pts = list(3, tuple(2, term_from_int(0), term_from_int(0)), tuple(2, term_from_int(9), term_from_int(0)),
+        tuple(2, term_from_int(0), term_from_int(9)));
+    expect_invalid("polygon with 2 points",
+        tuple(3, atom("polygon"), list(2, tuple(2, term_from_int(0), term_from_int(0)), tuple(2, term_from_int(9), term_from_int(0))), c));
+    expect_invalid("polygon improper list",
+        tuple(3, atom("polygon"),
+            cons(tuple(2, term_from_int(0), term_from_int(0)),
+                cons(tuple(2, term_from_int(9), term_from_int(0)), cons(tuple(2, term_from_int(0), term_from_int(9)), term_from_int(1)))),
+            c));
+    expect_invalid("polygon point not a tuple",
+        tuple(3, atom("polygon"), list(3, tuple(2, term_from_int(0), term_from_int(0)), term_from_int(9), tuple(2, term_from_int(0), term_from_int(9))), c));
+    expect_invalid("polygon point arity 3",
+        tuple(3, atom("polygon"),
+            list(3, tuple(2, term_from_int(0), term_from_int(0)), tuple(3, term_from_int(9), term_from_int(0), term_from_int(0)),
+                tuple(2, term_from_int(0), term_from_int(9))),
+            c));
+    expect_invalid("polygon point above limit",
+        tuple(3, atom("polygon"),
+            list(3, tuple(2, term_from_int(0), term_from_int(0)), tuple(2, term_from_int(SHAPE_VALUE_LIMIT + 1), term_from_int(0)),
+                tuple(2, term_from_int(0), term_from_int(9))),
+            c));
+    expect_invalid("polygon not a list", tuple(3, atom("polygon"), term_from_int(4), c));
+    expect_invalid("polygon arity 4", tuple(4, atom("polygon"), pts, c, term_from_int(0)));
+
+    term many = term_nil();
+    for (int i = 0; i < SHAPE_POLYGON_MAX_POINTS + 1; i++) {
+        many = cons(tuple(2, term_from_int(i % 2 ? 40 : 0), term_from_int(i % 40)), many);
+    }
+    expect_invalid("polygon above the point cap", tuple(3, atom("polygon"), many, c));
+
+    if (big_ints()) {
+        avm_int_t wrap = ((avm_int_t) 1 << 32) + 5;
+        expect_invalid("rounded_rect width 2^32 + 5",
+            tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(wrap), term_from_int(9), term_from_int(2), c));
+        expect_invalid("circle radius 2^32 + 5",
+            tuple(5, atom("circle"), term_from_int(10), term_from_int(10), term_from_int(wrap), c));
+        expect_invalid("circle cx 2^32 + 5",
+            tuple(5, atom("circle"), term_from_int(wrap), term_from_int(10), term_from_int(3), c));
+        expect_invalid("line thickness 2^32 + 1",
+            tuple(7, atom("line"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(wrap - 4), c));
+        expect_invalid("polygon point 2^32 + 5",
+            tuple(3, atom("polygon"),
+                list(3, tuple(2, term_from_int(0), term_from_int(0)), tuple(2, term_from_int(wrap), term_from_int(0)),
+                    tuple(2, term_from_int(0), term_from_int(9))),
+                c));
+        avm_int_t huge = (avm_int_t) 1 << 40;
+        expect_invalid("arc equal huge angles",
+            tuple(8, atom("arc"), term_from_int(20), term_from_int(20), term_from_int(10), term_from_int(3), term_from_int(huge),
+                term_from_int(huge), c));
+    }
 }
 
 static void test_image_valid(void)
@@ -373,7 +460,7 @@ static void test_scaled_cropped_image_valid(void)
     BaseDisplayItem item;
     term bin = pixels(32);
     parse(tuple(12, atom("scaled_cropped_image"), term_from_int(5), term_from_int(6), term_from_int(7), term_from_int(8),
-              term_from_int(0xABCDEF), term_from_int(3), term_from_int(1), term_from_int(2), term_from_int(3), term_nil(),
+              term_from_int(0xABCDEF), term_from_int(3), term_from_int(1), term_from_int(2), term_from_int(3), flips(true, true),
               rgba(4, 2, bin)),
         &item);
     CHECK(item.primitive == PrimitiveScaledCroppedImage, "sci: primitive %d", item.primitive);
@@ -382,14 +469,146 @@ static void test_scaled_cropped_image_valid(void)
     CHECK(item.brcolor == 0xABCDEFFF, "sci: brcolor %#x", (unsigned) item.brcolor);
     CHECK(item.source_x == 3 && item.source_y == 1 && item.x_scale == 2 && item.y_scale == 3,
         "sci: source (%d, %d) scale (%d, %d)", item.source_x, item.source_y, item.x_scale, item.y_scale);
+    CHECK(item.flip_x && item.flip_y, "sci: flips %d %d", item.flip_x, item.flip_y);
     CHECK(item.data.image_data_with_size.width == 4 && item.data.image_data_with_size.height == 2
             && item.data.image_data_with_size.pix == term_binary_data(bin),
         "sci: image data");
     delete_item(&item);
 
-    parse(sci(9, 9, 3, 1, 3, 3, term_nil(), rgba(4, 2, pixels(32))), &item);
+    parse(sci(4, 2, 0, 0, 1, 1, list(2, tuple(2, atom("flip_x"), FALSE_ATOM), term_from_int(3)), rgba(4, 2, pixels(32))),
+        &item);
+    CHECK(item.primitive == PrimitiveScaledCroppedImage && !item.flip_x && !item.flip_y,
+        "sci with false/garbage opts: primitive %d flips %d %d", item.primitive, item.flip_x, item.flip_y);
+    delete_item(&item);
+
+    struct
+    {
+        const char *name;
+        term opts;
+        bool flip_x;
+        bool flip_y;
+    } opts[] = {
+        { "bare atoms", list(2, atom("flip_y"), atom("flip_x")), true, true },
+        { "bare flip_x", list(1, atom("flip_x")), true, false },
+        { "mixed forms", list(3, atom("flip_y"), tuple(2, atom("flip_x"), TRUE_ATOM), atom("other")), true, true },
+        { "{flip_y, 1}", list(1, tuple(2, atom("flip_y"), term_from_int(1))), false, false },
+        { "{flip_x}", list(1, tuple(1, atom("flip_x"))), false, false },
+        { "not a list", atom("flip_x"), false, false },
+        { "a tuple", tuple(2, atom("flip_x"), TRUE_ATOM), false, false },
+        { "improper tail", cons(atom("flip_y"), atom("flip_x")), false, true },
+    };
+    for (size_t i = 0; i < sizeof(opts) / sizeof(opts[0]); i++) {
+        parse(sci(4, 2, 0, 0, 1, 1, opts[i].opts, rgba(4, 2, pixels(32))), &item);
+        CHECK(item.primitive == PrimitiveScaledCroppedImage && item.flip_x == opts[i].flip_x
+                && item.flip_y == opts[i].flip_y,
+            "sci opts %s: primitive %d flips %d %d", opts[i].name, item.primitive, item.flip_x, item.flip_y);
+        delete_item(&item);
+    }
+
+    parse(sci(9, 9, 3, 1, 3, 3, flips(true, true), rgba(4, 2, pixels(32))), &item);
     CHECK(item.primitive == PrimitiveScaledCroppedImage, "sci at last pixel: primitive %d", item.primitive);
     delete_item(&item);
+}
+
+static void check_shape(const char *name, term req, shape_kind_t kind, int x, int y, int w, int h,
+    BaseDisplayItem *out)
+{
+    BaseDisplayItem item;
+    parse(req, &item);
+    CHECK(item.primitive == PrimitiveShape && item.data.shape_data.shape != NULL, "%s: primitive %d", name, item.primitive);
+    if (out) {
+        memset(out, 0, sizeof(*out));
+    }
+    if (item.primitive != PrimitiveShape) {
+        return;
+    }
+    CHECK(shape_kind(item.data.shape_data.shape) == kind, "%s: kind %d", name, shape_kind(item.data.shape_data.shape));
+    CHECK(item.brcolor == 0x123456FF, "%s: brcolor %#x", name, (unsigned) item.brcolor);
+    CHECK(item.x == x && item.y == y && item.width == w && item.height == h,
+        "%s: bbox (%d, %d, %d, %d), expected (%d, %d, %d, %d)", name, item.x, item.y, item.width,
+        item.height, x, y, w, h);
+    if (out) {
+        *out = item;
+    } else {
+        delete_item(&item);
+    }
+}
+
+static void check_arc_sweep(avm_int_t start, avm_int_t end, int sweep)
+{
+    BaseDisplayItem item;
+    char name[96];
+    snprintf(name, sizeof(name), "arc %lld..%lld", (long long) start, (long long) end);
+    check_shape(name,
+        tuple(8, atom("arc"), term_from_int(20), term_from_int(20), term_from_int(10), term_from_int(3), term_from_int(start), term_from_int(end),
+            term_from_int(0x123456)),
+        ShapeKindArc, 10, 10, 21, 21, &item);
+    if (item.primitive == PrimitiveShape) {
+        int ref_start = (int) (((start % 360) + 360) % 360);
+        struct ShapeData *ref = shape_new_arc(20, 20, 10, 3, ref_start, ref_start + sweep);
+        CHECK(ref != NULL && shape_equal(item.data.shape_data.shape, ref), "%s: sweep is not %d", name, sweep);
+        shape_destroy(ref);
+        delete_item(&item);
+    }
+}
+
+static void test_shape_valid(void)
+{
+    term c = term_from_int(0x123456);
+
+    check_shape("circle", tuple(5, atom("circle"), term_from_int(10), term_from_int(12), term_from_int(4), c), ShapeKindEllipse, 6, 8,
+        9, 9, NULL);
+    check_shape("ellipse", tuple(6, atom("ellipse"), term_from_int(10), term_from_int(12), term_from_int(4), term_from_int(2), c),
+        ShapeKindEllipse, 6, 10, 9, 5, NULL);
+    check_shape("rounded_rect",
+        tuple(7, atom("rounded_rect"), term_from_int(1), term_from_int(2), term_from_int(30), term_from_int(20), term_from_int(5), c),
+        ShapeKindRoundedRect, 1, 2, 30, 20, NULL);
+    check_shape("line", tuple(7, atom("line"), term_from_int(0), term_from_int(5), term_from_int(40), term_from_int(5), term_from_int(1), c),
+        ShapeKindLine, 0, 5, 41, 1, NULL);
+    check_shape("circle at the value limit",
+        tuple(5, atom("circle"), term_from_int(-SHAPE_VALUE_LIMIT), term_from_int(SHAPE_VALUE_LIMIT), term_from_int(SHAPE_VALUE_LIMIT), c),
+        ShapeKindEllipse, -2 * SHAPE_VALUE_LIMIT, 0, 2 * SHAPE_VALUE_LIMIT + 1, 2 * SHAPE_VALUE_LIMIT + 1, NULL);
+    check_shape("polygon",
+        tuple(3, atom("polygon"),
+            list(3, tuple(2, term_from_int(2), term_from_int(3)), tuple(2, term_from_int(30), term_from_int(3)),
+                tuple(2, term_from_int(2), term_from_int(25))),
+            c),
+        ShapeKindPolygon, 2, 3, 28, 22, NULL);
+
+    term many = term_nil();
+    struct ShapePoint many_points[SHAPE_POLYGON_MAX_POINTS];
+    for (int i = 0; i < SHAPE_POLYGON_MAX_POINTS; i++) {
+        many = cons(tuple(2, term_from_int(i % 2 ? 40 : 0), term_from_int(i / 2)), many);
+        many_points[SHAPE_POLYGON_MAX_POINTS - 1 - i] = (struct ShapePoint){ i % 2 ? 40 : 0, i / 2 };
+    }
+    BaseDisplayItem comb;
+    check_shape("polygon at the point cap", tuple(3, atom("polygon"), many, c), ShapeKindPolygon, 0, 0, 40, SHAPE_POLYGON_MAX_POINTS / 2 - 1, &comb);
+    if (comb.primitive == PrimitiveShape) {
+        struct ShapeData *ref = shape_new_polygon(many_points, SHAPE_POLYGON_MAX_POINTS);
+        CHECK(ref != NULL && shape_equal(comb.data.shape_data.shape, ref), "polygon cap: points differ");
+        shape_destroy(ref);
+        delete_item(&comb);
+    }
+
+    check_arc_sweep(0, 90, 90);
+    check_arc_sweep(0, -90, 270);
+    check_arc_sweep(0, -359, 1);
+    check_arc_sweep(0, 400, 40);
+    check_arc_sweep(0, 360, 360);
+    check_arc_sweep(0, -360, 360);
+    check_arc_sweep(0, 720, 360);
+    check_arc_sweep(-720, 0, 360);
+    check_arc_sweep(350, 10, 20);
+    check_arc_sweep(10, 350, 340);
+    if (big_ints()) {
+        avm_int_t huge = (avm_int_t) 1 << 40;
+        check_arc_sweep(huge, huge + 90, 90);
+        check_arc_sweep(huge, huge + 360, 360);
+        check_arc_sweep(-huge, -huge - 90, 270);
+        avm_int_t turns = (avm_int_t) 360 << 32;
+        check_arc_sweep(turns + 5, 5, 360);
+        check_arc_sweep(turns + 5, 95, 90);
+    }
 }
 
 static void test_integer_forms(void)
@@ -418,6 +637,38 @@ static void test_integer_forms(void)
     delete_item(&item);
     expect_invalid("image x boxed 2^31",
         tuple(5, atom("image"), boxed_int((avm_int64_t) 1 << 31), term_from_int(0), transparent, ok_img));
+    expect_invalid("circle radius boxed 2^40",
+        tuple(5, atom("circle"), term_from_int(0), term_from_int(0), boxed_int((avm_int64_t) 1 << 40), term_from_int(0)));
+
+    struct
+    {
+        avm_int64_t start;
+        avm_int64_t end;
+        int ref_start;
+        int sweep;
+    } arcs[] = {
+        { (avm_int64_t) 1 << 27, ((avm_int64_t) 1 << 27) + 90, (int) (((avm_int64_t) 1 << 27) % 360), 90 },
+        { -((avm_int64_t) 1 << 27), 0, (int) (360 - ((avm_int64_t) 1 << 27) % 360), (int) (((avm_int64_t) 1 << 27) % 360) },
+        { INT64_MAX, INT64_MAX - 10, (int) (INT64_MAX % 360), 350 },
+        { INT64_MIN, 0, (int) (360 + INT64_MIN % 360), (int) (-(INT64_MIN % 360)) },
+        { (avm_int64_t) 360 << 40, 0, 0, 360 },
+    };
+    for (size_t i = 0; i < sizeof(arcs) / sizeof(arcs[0]); i++) {
+        parse(tuple(8, atom("arc"), term_from_int(20), term_from_int(20), term_from_int(10), term_from_int(3), boxed_int(arcs[i].start),
+                  boxed_int(arcs[i].end), term_from_int(0)),
+            &item);
+        CHECK(item.primitive == PrimitiveShape, "boxed arc %zu: primitive %d", i, item.primitive);
+        if (item.primitive == PrimitiveShape) {
+            struct ShapeData *ref = shape_new_arc(20, 20, 10, 3, arcs[i].ref_start, arcs[i].ref_start + arcs[i].sweep);
+            CHECK(ref != NULL && shape_equal(item.data.shape_data.shape, ref), "boxed arc %zu: expected %d + %d", i,
+                arcs[i].ref_start, arcs[i].sweep);
+            shape_destroy(ref);
+        }
+        delete_item(&item);
+    }
+    expect_invalid("arc equal boxed angles",
+        tuple(8, atom("arc"), term_from_int(20), term_from_int(20), term_from_int(10), term_from_int(3), boxed_int(INT64_MIN),
+            boxed_int(INT64_MIN), term_from_int(0)));
 }
 
 static term text_binary(const char *text)
@@ -565,6 +816,20 @@ static void test_text(void)
     expect_invalid("text not a string", text(term_from_int(0), font, fg, transparent, term_from_int(3)));
     expect_invalid("text improper list", text(term_from_int(0), font, fg, transparent, cons(term_from_int('a'), term_from_int(3))));
     expect_invalid_on_alloc_failure("text", text(term_from_int(0), font, fg, transparent, string("abc")), 1);
+}
+
+static void test_alloc_failures(void)
+{
+    term c = term_from_int(0x123456);
+    expect_invalid_on_alloc_failure("rounded_rect",
+        tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(2), c), 1);
+    expect_invalid_on_alloc_failure("circle", tuple(5, atom("circle"), term_from_int(10), term_from_int(10), term_from_int(4), c), 1);
+    expect_invalid_on_alloc_failure("polygon",
+        tuple(3, atom("polygon"),
+            list(3, tuple(2, term_from_int(0), term_from_int(0)), tuple(2, term_from_int(9), term_from_int(0)),
+                tuple(2, term_from_int(0), term_from_int(9))),
+            c),
+        1);
 }
 
 static term *heap_mark(void)
@@ -730,6 +995,73 @@ static void test_log_format(void)
     heap_release(mark);
 }
 
+static void expect_reason(const char *name, term req, const char *expected)
+{
+    static char log[256];
+    BaseDisplayItem item;
+    begin_capture();
+    display_items_init_item(&item, req, &ctx);
+    end_capture(log, sizeof(log));
+    delete_item(&item);
+    CHECK(strcmp(log, expected) == 0, "%s: logged\n%s", name, log);
+}
+
+static void expect_reason_on_alloc_failure(const char *name, term req, const char *expected)
+{
+    alloc_counter_fail_at = alloc_counter_calls + 1;
+    expect_reason(name, req, expected);
+    alloc_counter_fail_at = -1;
+}
+
+static void test_shape_reasons(void)
+{
+    term *mark = heap_mark();
+    term c = term_from_int(0xFF0000);
+
+    expect_reason("rounded_rect arity",
+        tuple(6, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(2)),
+        "invalid display list item (rounded_rect/6): wrong arity\n");
+    expect_reason("rounded_rect zero width",
+        tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(2), c),
+        "invalid display list item (rounded_rect/7): bad position, size, radius or color\n");
+    expect_reason_on_alloc_failure("rounded_rect",
+        tuple(7, atom("rounded_rect"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(2), c),
+        "invalid display list item (rounded_rect/7): out of memory\n");
+    expect_reason("circle arity", tuple(4, atom("circle"), term_from_int(0), term_from_int(0), term_from_int(3)),
+        "invalid display list item (circle/4): wrong arity\n");
+    expect_reason("circle zero radius", tuple(5, atom("circle"), term_from_int(0), term_from_int(0), term_from_int(0), c),
+        "invalid display list item (circle/5): bad center, radius or color\n");
+    expect_reason_on_alloc_failure("circle", tuple(5, atom("circle"), term_from_int(0), term_from_int(0), term_from_int(3), c),
+        "invalid display list item (circle/5): out of memory\n");
+
+    expect_reason("ellipse zero radius",
+        tuple(6, atom("ellipse"), term_from_int(0), term_from_int(0), term_from_int(3), term_from_int(0), c),
+        "invalid display list item (ellipse/6): bad center, radii or color\n");
+    expect_reason("line zero thickness",
+        tuple(7, atom("line"), term_from_int(0), term_from_int(0), term_from_int(9), term_from_int(9), term_from_int(0), c),
+        "invalid display list item (line/7): bad points, thickness or color\n");
+    expect_reason("arc equal angles",
+        tuple(8, atom("arc"), term_from_int(20), term_from_int(20), term_from_int(10), term_from_int(3), term_from_int(45), term_from_int(45), c),
+        "invalid display list item (arc/8): bad center, radius, thickness, angles or color\n");
+    expect_reason("polygon two points", tuple(3, atom("polygon"), list(2, tuple(2, term_from_int(0), term_from_int(0)), tuple(2, term_from_int(4), term_from_int(0))), c),
+        "invalid display list item (polygon/3): bad points or color\n");
+    expect_reason("polygon point not a pair", tuple(3, atom("polygon"), list(3, tuple(2, term_from_int(0), term_from_int(0)), tuple(2, term_from_int(4), term_from_int(0)), term_from_int(4)), c),
+        "invalid display list item (polygon/3): bad points or color\n");
+    term too_many = term_nil();
+    for (int i = 0; i < SHAPE_POLYGON_MAX_POINTS + 1; i++) {
+        too_many = cons(tuple(2, term_from_int(i % 2), term_from_int(i)), too_many);
+    }
+    expect_reason("polygon above the point cap", tuple(3, atom("polygon"), too_many, c),
+        "invalid display list item (polygon/3): too many points\n");
+    expect_reason_on_alloc_failure("polygon",
+        tuple(3, atom("polygon"),
+            list(3, tuple(2, term_from_int(0), term_from_int(0)), tuple(2, term_from_int(9), term_from_int(0)),
+                tuple(2, term_from_int(0), term_from_int(9))),
+            c),
+        "invalid display list item (polygon/3): out of memory\n");
+    heap_release(mark);
+}
+
 static void test_new_list(void)
 {
     static char log[4096];
@@ -804,6 +1136,8 @@ struct Sprite
     int source_y;
     int x_scale;
     int y_scale;
+    bool flip_x;
+    bool flip_y;
     int img_width;
     int img_height;
     const uint8_t *bytes;
@@ -831,6 +1165,12 @@ static bool sprite_pixel(const struct Sprite *s, int px, int py, uint16_t *color
     if (px < 0 || py < 0 || px >= drawn_w || py >= drawn_h) {
         return false;
     }
+    if (s->flip_x) {
+        px = drawn_w - 1 - px;
+    }
+    if (s->flip_y) {
+        py = drawn_h - 1 - py;
+    }
     int c = px / s->x_scale;
     int r = py / s->y_scale;
     *color = expected_color(s->bytes + 4 * ((s->source_y + r) * s->img_width + s->source_x + c));
@@ -843,8 +1183,9 @@ static void check_sprite_pixels(const struct Sprite *s, int seed)
     static uint16_t frame[SCREEN_W * SCREEN_H];
     char name[160];
     snprintf(name, sizeof(name),
-        "sprite %dx%d from (%d, %d) of %dx%d, scale %dx%d, at (%d, %d)", s->width, s->height,
-        s->source_x, s->source_y, s->img_width, s->img_height, s->x_scale, s->y_scale, s->x, s->y);
+        "sprite %dx%d from (%d, %d) of %dx%d, scale %dx%d, flip %d %d, at (%d, %d)", s->width, s->height,
+        s->source_x, s->source_y, s->img_width, s->img_height, s->x_scale, s->y_scale, s->flip_x, s->flip_y,
+        s->x, s->y);
 
     memset(expected, 0, sizeof(expected));
     for (int y = 0; y < SCREEN_H; y++) {
@@ -857,7 +1198,7 @@ static void check_sprite_pixels(const struct Sprite *s, int seed)
     term bin = term_from_const_binary(s->bytes, s->img_width * s->img_height * 4, &heap, &glb);
     term req = tuple(12, atom("scaled_cropped_image"), term_from_int(s->x), term_from_int(s->y), term_from_int(s->width),
         term_from_int(s->height), atom("transparent"), term_from_int(s->source_x), term_from_int(s->source_y),
-        term_from_int(s->x_scale), term_from_int(s->y_scale), term_nil(),
+        term_from_int(s->x_scale), term_from_int(s->y_scale), flips(s->flip_x, s->flip_y),
         rgba(s->img_width, s->img_height, bin));
 
     BaseDisplayItem item;
@@ -873,6 +1214,291 @@ static void check_sprite_pixels(const struct Sprite *s, int seed)
     render(display_list, frame);
     compare_frames(name, expected, frame);
     heap_release(mark);
+}
+
+static uint32_t scene_rng = 1;
+
+static int scene_rand(int n)
+{
+    scene_rng = scene_rng * 1103515245u + 12345u;
+    return (int) ((scene_rng >> 8) % (uint32_t) n);
+}
+
+static uint32_t scene_color(void)
+{
+    return ((uint32_t) scene_rand(0x1000000) << 8) | 0xFF;
+}
+
+typedef enum
+{
+    RendererDcsLcd,
+    RendererMono,
+    RendererEpaper
+} renderer_t;
+
+static const char *const renderer_names[] = { "dcs_lcd", "mono", "epaper" };
+
+static int renderer_line_bytes(renderer_t renderer)
+{
+    switch (renderer) {
+        case RendererMono:
+            return SCREEN_W / 8;
+        case RendererEpaper:
+            return SCREEN_W / 2;
+        default:
+            return SCREEN_W * 2;
+    }
+}
+
+static int renderer_draw_x(renderer_t renderer, int w, uint16_t *line, int xpos, int ypos, BaseDisplayItem *row)
+{
+    switch (renderer) {
+        case RendererMono: {
+            struct MonoScreen screen = { .w = w, .h = SCREEN_H };
+            return mono_draw_x(&screen, (uint8_t *) line, xpos, ypos, row);
+        }
+        case RendererEpaper: {
+            struct EpaperScreen screen = { .w = w, .h = SCREEN_H, .palette = epaper_acep_palette, .palette_size = 7 };
+            return epaper_draw_x(&screen, (uint8_t *) line, xpos, ypos, row);
+        }
+        default: {
+            struct DCSLCDScreen screen;
+            memset(&screen, 0, sizeof(screen));
+            screen.w = w;
+            screen.h = SCREEN_H;
+            screen.pixels = line;
+            return dcs_lcd_draw_x(&screen, xpos, ypos, row);
+        }
+    }
+}
+
+// One pixel per call: no run is ever longer than 1, so this is the reference for the runs
+static void render_items(renderer_t renderer, BaseDisplayItem *items, size_t len, uint8_t *frame, bool one_pixel)
+{
+    uint16_t line[SCREEN_W];
+    int line_bytes = renderer_line_bytes(renderer);
+
+    for (int ypos = 0; ypos < SCREEN_H; ypos++) {
+        memset(line, 0, sizeof(line));
+        BaseDisplayItem *row = display_items_row(items, len, ypos);
+        int xpos = 0;
+        while (xpos < SCREEN_W) {
+            int drawn_pixels = renderer_draw_x(renderer, one_pixel ? xpos + 1 : SCREEN_W, line, xpos, ypos, row);
+            if (drawn_pixels <= 0 || (one_pixel && drawn_pixels != 1)) {
+                fprintf(stderr, "%s draw_x returned %d at (%d, %d)\n", renderer_names[renderer], drawn_pixels, xpos,
+                    ypos);
+                abort();
+            }
+            xpos += drawn_pixels;
+        }
+        memcpy(frame + ypos * line_bytes, line, line_bytes);
+    }
+}
+
+static uint32_t *scene_image(int width, int height)
+{
+    static const uint8_t alphas[] = { 0, 0, 0x80, 0xFF, 0xFF, 0xFF };
+    uint32_t *pix = malloc(sizeof(uint32_t) * width * height);
+    if (pix == NULL) {
+        abort();
+    }
+    for (int i = 0; i < width * height; i++) {
+        uint32_t rgb = (uint32_t) scene_rand(0x1000000);
+        uint8_t bytes[4] = { rgb >> 16, rgb >> 8, rgb, alphas[scene_rand(sizeof(alphas))] };
+        memcpy(&pix[i], bytes, 4);
+    }
+    return pix;
+}
+
+static struct ShapeData *scene_shape(void)
+{
+    int x = scene_rand(SCREEN_W + 20) - 10;
+    int y = scene_rand(SCREEN_H + 20) - 10;
+    switch (scene_rand(5)) {
+        case 0:
+            return shape_new_rounded_rect(x, y, 1 + scene_rand(40), 1 + scene_rand(30), scene_rand(12));
+        case 1:
+            return shape_new_ellipse(x, y, 1 + scene_rand(20), 1 + scene_rand(20));
+        case 2:
+            return shape_new_line(x, y, scene_rand(SCREEN_W), scene_rand(SCREEN_H), 1 + scene_rand(6));
+        case 3:
+            return shape_new_arc(x, y, 1 + scene_rand(24), 1 + scene_rand(8), scene_rand(360),
+                scene_rand(360) + 1);
+        default: {
+            struct ShapePoint points[8];
+            int n = 3 + scene_rand(6);
+            for (int i = 0; i < n; i++) {
+                points[i] = (struct ShapePoint){ x + scene_rand(40), y + scene_rand(30) };
+            }
+            return shape_new_polygon(points, n);
+        }
+    }
+}
+
+static void test_runs_match_pixels(void)
+{
+    static const char *const texts[] = { "Hi", "a b", " .:", "#O", "i  I", "  " };
+    static uint8_t expected[SCREEN_W * 2 * SCREEN_H];
+    static uint8_t frame[SCREEN_W * 2 * SCREEN_H];
+
+    for (int scene = 0; scene < 2000; scene++) {
+        BaseDisplayItem items[12];
+        uint32_t *images[12];
+        size_t len = 1 + scene_rand(12);
+        memset(items, 0, sizeof(items));
+        for (size_t i = 0; i < len; i++) {
+            BaseDisplayItem *item = &items[i];
+            images[i] = NULL;
+            item->x = scene_rand(SCREEN_W + 10) - 5;
+            item->y = scene_rand(SCREEN_H + 10) - 5;
+            item->brcolor = scene_rand(2) ? scene_color() : 0;
+            switch (scene_rand(5)) {
+                case 0:
+                    item->primitive = PrimitiveRect;
+                    item->width = 1 + scene_rand(40);
+                    item->height = 1 + scene_rand(30);
+                    item->brcolor = scene_color();
+                    break;
+                case 1:
+                    item->primitive = PrimitiveText;
+                    item->data.text_data.text = texts[scene_rand(sizeof(texts) / sizeof(texts[0]))];
+                    item->data.text_data.fgcolor = scene_color();
+                    item->width = (int) strlen(item->data.text_data.text) * 8;
+                    item->height = 16;
+                    break;
+                case 2:
+                    item->primitive = PrimitiveImage;
+                    item->width = 1 + scene_rand(24);
+                    item->height = 1 + scene_rand(24);
+                    images[i] = scene_image(item->width, item->height);
+                    item->data.image_data.pix = (const char *) images[i];
+                    break;
+                case 3: {
+                    int img_width = 1 + scene_rand(12);
+                    int img_height = 1 + scene_rand(12);
+                    item->primitive = PrimitiveScaledCroppedImage;
+                    item->source_x = scene_rand(img_width);
+                    item->source_y = scene_rand(img_height);
+                    item->x_scale = 1 + scene_rand(3);
+                    item->y_scale = 1 + scene_rand(3);
+                    item->flip_x = scene_rand(2);
+                    item->flip_y = scene_rand(2);
+                    item->width = 1 + scene_rand((img_width - item->source_x) * item->x_scale);
+                    item->height = 1 + scene_rand((img_height - item->source_y) * item->y_scale);
+                    images[i] = scene_image(img_width, img_height);
+                    item->data.image_data_with_size.width = img_width;
+                    item->data.image_data_with_size.height = img_height;
+                    item->data.image_data_with_size.pix = (const char *) images[i];
+                    break;
+                }
+                default: {
+                    struct ShapeData *shape = scene_shape();
+                    if (shape == NULL) {
+                        item->primitive = PrimitiveRect;
+                        item->width = 1;
+                        item->height = 1;
+                        item->brcolor = scene_color();
+                        break;
+                    }
+                    item->primitive = PrimitiveShape;
+                    item->brcolor = scene_color();
+                    item->data.shape_data.shape = shape;
+                    shape_bounds(shape, &item->x, &item->y, &item->width, &item->height);
+                    break;
+                }
+            }
+        }
+
+        bool same = true;
+        for (renderer_t renderer = RendererDcsLcd; renderer <= RendererEpaper && same; renderer++) {
+            render_items(renderer, items, len, expected, true);
+            render_items(renderer, items, len, frame, false);
+            same = memcmp(expected, frame, renderer_line_bytes(renderer) * SCREEN_H) == 0;
+            CHECK(same, "%s scene %d: rendering by runs differs from rendering pixel by pixel",
+                renderer_names[renderer], scene);
+        }
+
+        for (size_t i = 0; i < len; i++) {
+            if (items[i].primitive == PrimitiveShape) {
+                shape_destroy(items[i].data.shape_data.shape);
+            }
+            free(images[i]);
+        }
+        if (!same) {
+            return;
+        }
+    }
+}
+
+static int draw_image_x(renderer_t renderer, BaseDisplayItem *item)
+{
+    uint16_t line[SCREEN_W];
+    memset(line, 0, sizeof(line));
+    bool scaled = item->primitive == PrimitiveScaledCroppedImage;
+    switch (renderer) {
+        case RendererMono: {
+            struct MonoScreen screen = { .w = SCREEN_W, .h = SCREEN_H };
+            return scaled ? mono_draw_scaled_cropped_img_x(&screen, (uint8_t *) line, 0, 0, 2, item)
+                          : mono_draw_image_x(&screen, (uint8_t *) line, 0, 0, 2, item);
+        }
+        case RendererEpaper: {
+            struct EpaperScreen screen = { .w = SCREEN_W, .h = SCREEN_H, .palette = epaper_acep_palette, .palette_size = 7 };
+            return scaled ? epaper_draw_scaled_cropped_img_x(&screen, (uint8_t *) line, 0, 0, 2, item)
+                          : epaper_draw_image_x(&screen, (uint8_t *) line, 0, 0, 2, item);
+        }
+        default: {
+            struct DCSLCDScreen screen;
+            memset(&screen, 0, sizeof(screen));
+            screen.w = SCREEN_W;
+            screen.h = SCREEN_H;
+            screen.pixels = line;
+            return scaled ? dcs_lcd_draw_scaled_cropped_img_x(&screen, 0, 0, 2, item)
+                          : dcs_lcd_draw_image_x(&screen, 0, 0, 2, item);
+        }
+    }
+}
+
+static void test_image_alpha(void)
+{
+    static const uint8_t transparent_red[4] = { 0xFF, 0, 0, 0 };
+    static const uint8_t opaque_black[4] = { 0, 0, 0, 0xFF };
+    struct
+    {
+        const uint8_t *pixels[2];
+        int expected;
+    } cases[] = {
+        { { transparent_red, opaque_black }, -1 },
+        { { opaque_black, transparent_red }, 1 },
+        { { transparent_red, transparent_red }, -2 },
+    };
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        uint8_t pix[8];
+        memcpy(pix, cases[i].pixels[0], 4);
+        memcpy(pix + 4, cases[i].pixels[1], 4);
+        for (renderer_t renderer = RendererDcsLcd; renderer <= RendererEpaper; renderer++) {
+            for (int scaled = 0; scaled < 2; scaled++) {
+                BaseDisplayItem item;
+                memset(&item, 0, sizeof(item));
+                item.width = 2;
+                item.height = 1;
+                if (scaled) {
+                    item.primitive = PrimitiveScaledCroppedImage;
+                    item.x_scale = 1;
+                    item.y_scale = 1;
+                    item.data.image_data_with_size.width = 2;
+                    item.data.image_data_with_size.height = 1;
+                    item.data.image_data_with_size.pix = (const char *) pix;
+                } else {
+                    item.primitive = PrimitiveImage;
+                    item.data.image_data.pix = (const char *) pix;
+                }
+                int drawn = draw_image_x(renderer, &item);
+                CHECK(drawn == cases[i].expected, "%s %s alpha case %zu: returned %d, expected %d",
+                    renderer_names[renderer], scaled ? "scaled image" : "image", i, drawn, cases[i].expected);
+            }
+        }
+    }
 }
 
 static void test_sprite_pixels(void)
@@ -891,31 +1517,35 @@ static void test_sprite_pixels(void)
             for (int crop = 0; crop < 3; crop++) {
                 for (int xs = 1; xs <= 3; xs++) {
                     for (int ys = 1; ys <= 3; ys++) {
-                        int rest_w = ImgW - sx;
-                        int rest_h = ImgH - sy;
-                        struct Sprite s;
-                        memset(&s, 0, sizeof(s));
-                        s.img_width = ImgW;
-                        s.img_height = ImgH;
-                        s.bytes = bytes;
-                        s.source_x = sx;
-                        s.source_y = sy;
-                        s.x_scale = xs;
-                        s.y_scale = ys;
-                        if (crop == 0) {
-                            s.width = (rest_w - 2) * xs - (xs - 1);
-                            s.height = (rest_h - 2) * ys - (ys - 1);
-                        } else if (crop == 1) {
-                            s.width = rest_w * xs;
-                            s.height = rest_h * ys;
-                        } else {
-                            s.width = rest_w * xs + 3;
-                            s.height = rest_h * ys + 2 * ys + 1;
+                        for (int f = 0; f < 4; f++) {
+                            int rest_w = ImgW - sx;
+                            int rest_h = ImgH - sy;
+                            struct Sprite s;
+                            memset(&s, 0, sizeof(s));
+                            s.img_width = ImgW;
+                            s.img_height = ImgH;
+                            s.bytes = bytes;
+                            s.source_x = sx;
+                            s.source_y = sy;
+                            s.x_scale = xs;
+                            s.y_scale = ys;
+                            s.flip_x = f & 1;
+                            s.flip_y = f & 2;
+                            if (crop == 0) {
+                                s.width = (rest_w - 2) * xs - (xs - 1);
+                                s.height = (rest_h - 2) * ys - (ys - 1);
+                            } else if (crop == 1) {
+                                s.width = rest_w * xs;
+                                s.height = rest_h * ys;
+                            } else {
+                                s.width = rest_w * xs + 3;
+                                s.height = rest_h * ys + 2 * ys + 1;
+                            }
+                            s.x = (seed % 5 == 4) ? -3 : 2 + seed % 7;
+                            s.y = (seed % 5 == 4) ? -2 : 1 + seed % 5;
+                            check_sprite_pixels(&s, seed);
+                            seed++;
                         }
-                        s.x = (seed % 5 == 4) ? -3 : 2 + seed % 7;
-                        s.y = (seed % 5 == 4) ? -2 : 1 + seed % 5;
-                        check_sprite_pixels(&s, seed);
-                        seed++;
                     }
                 }
             }
@@ -933,17 +1563,22 @@ int main(void)
 
     test_scaled_cropped_image_invalid();
     test_image_invalid();
-    test_command_invalid();
+    test_shape_invalid();
     test_image_valid();
     test_scaled_cropped_image_valid();
+    test_shape_valid();
     test_integer_forms();
     test_rect();
     test_text();
+    test_alloc_failures();
     test_log_format();
+    test_shape_reasons();
     test_new_list();
     test_huge_rect_pixels();
     test_image_pixels();
     test_sprite_pixels();
+    test_runs_match_pixels();
+    test_image_alpha();
 
     render(all_items, NULL);
 
