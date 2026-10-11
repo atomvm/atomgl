@@ -143,6 +143,7 @@ static bool do_update(struct OLEDDriver *driver, Message *message, term display_
         uint8_t *out_buf = buf + (DISPLAY_WIDTH / 8);
 
         for (int ypos = page * PAGE_HEIGHT; ypos < (page + 1) * PAGE_HEIGHT; ypos++) {
+            memset(buf, 0, DISPLAY_WIDTH / 8);
             BaseDisplayItem *row = display_items_row(update.items, update.items_len, ypos);
             int xpos = 0;
             while (xpos < screen_width) {
