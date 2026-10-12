@@ -141,6 +141,12 @@ static inline void rgb565_swapped_line_to_rgb888(uint8_t *dst, const uint16_t *s
 static void display_init(Context *ctx, term opts);
 static void display_init_using_list(struct DCSLCDDriver *driver, term init_list);
 
+// ESP-IDF's default limit for one SPI transaction.
+#define DCS_LCD_MAX_TRANSFER_BYTES 4092
+
+// Keeps the batch buffers small.
+#define DCS_LCD_MAX_BATCH_LINES 8
+
 static void do_update(Context *ctx, term display_list)
 {
 #ifdef ATOMGL_PROFILE
@@ -172,28 +178,37 @@ static void do_update(Context *ctx, term display_list)
     int64_t spi_wait_us = 0;
 #endif
 
-    for (int ypos = 0; ypos < screen_height; ypos++) {
+    int batch_lines = driver->screen.batch_lines;
+
+    for (int y0 = 0; y0 < screen_height; y0 += batch_lines) {
+        int lines = (screen_height - y0 < batch_lines) ? screen_height - y0 : batch_lines;
+
+        // The drawing functions write at screen.pixels: move it down the batch.
+        uint16_t *batch_pixels = driver->screen.pixels;
+        for (int line = 0; line < lines; line++) {
+            int ypos = y0 + line;
+            driver->screen.pixels = batch_pixels + line * screen_width;
 #ifdef ATOMGL_PROFILE
-        int64_t line_start = esp_timer_get_time();
+            int64_t line_start = esp_timer_get_time();
 #endif
-        BaseDisplayItem *row = display_items_row(items, len, ypos);
-        int xpos = 0;
-        while (xpos < screen_width) {
-            int drawn_pixels = dcs_lcd_draw_x(&driver->screen, xpos, ypos, row);
-            xpos += drawn_pixels;
-        }
+            BaseDisplayItem *row = display_items_row(items, len, ypos);
+            int xpos = 0;
+            while (xpos < screen_width) {
+                int drawn_pixels = dcs_lcd_draw_x(&driver->screen, xpos, ypos, row);
+                xpos += drawn_pixels;
+            }
 #ifdef ATOMGL_PROFILE
-        int64_t line_us = esp_timer_get_time() - line_start;
-        draw_us += line_us;
-        if (line_us > max_line_us) {
-            max_line_us = line_us;
-        }
+            int64_t line_us = esp_timer_get_time() - line_start;
+            draw_us += line_us;
+            if (line_us > max_line_us) {
+                max_line_us = line_us;
+            }
 #endif
+        }
+        driver->screen.pixels = batch_pixels;
 
         if (transaction_in_progress) {
             spi_transaction_t *trans;
-            // I did a quick measurement, and most of the time is spent waiting for DMA transaction
-            // eg. 23 us spent in draw_x, 188 us spent in spi_device_get_trans_result
 #ifdef ATOMGL_PROFILE
             int64_t wait_start = esp_timer_get_time();
 #endif
@@ -203,20 +218,20 @@ static void do_update(Context *ctx, term display_list)
 #endif
         }
 
-        // Swap scanline buffers.
+        // Swap batch buffers.
         void *tmp = driver->screen.pixels;
         driver->screen.pixels = driver->screen.pixels_out;
         driver->screen.pixels_out = tmp;
 
         if (driver->desc->pixel_bytes == 2) {
-            spi_display_dma_write(&driver->bus.spi_disp, screen_width * sizeof(uint16_t), driver->screen.pixels_out);
+            spi_display_dma_write(&driver->bus.spi_disp, screen_width * lines * sizeof(uint16_t), driver->screen.pixels_out);
         } else {
             void *tmpb = driver->screen.bytes;
             driver->screen.bytes = driver->screen.bytes_out;
             driver->screen.bytes_out = tmpb;
 
-            rgb565_swapped_line_to_rgb888(driver->screen.bytes_out, driver->screen.pixels_out, screen_width);
-            spi_display_dma_write(&driver->bus.spi_disp, screen_width * 3, driver->screen.bytes_out);
+            rgb565_swapped_line_to_rgb888(driver->screen.bytes_out, driver->screen.pixels_out, screen_width * lines);
+            spi_display_dma_write(&driver->bus.spi_disp, screen_width * lines * 3, driver->screen.bytes_out);
         }
 
         transaction_in_progress = true;
@@ -359,11 +374,19 @@ static void display_init(Context *ctx, term opts)
     driver->madctl_bgr = desc->default_bgr;
     driver->screen.w = term_to_int(width_term);
     driver->screen.h = term_to_int(height_term);
-    driver->screen.pixels = heap_caps_malloc(driver->screen.w * sizeof(uint16_t), MALLOC_CAP_DMA);
-    driver->screen.pixels_out = heap_caps_malloc(driver->screen.w * sizeof(uint16_t), MALLOC_CAP_DMA);
+    int batch_lines = DCS_LCD_MAX_TRANSFER_BYTES / (driver->screen.w * desc->pixel_bytes);
+    if (batch_lines > DCS_LCD_MAX_BATCH_LINES) {
+        batch_lines = DCS_LCD_MAX_BATCH_LINES;
+    }
+    if (batch_lines < 1) {
+        batch_lines = 1;
+    }
+    driver->screen.batch_lines = batch_lines;
+    driver->screen.pixels = heap_caps_malloc(driver->screen.w * batch_lines * sizeof(uint16_t), MALLOC_CAP_DMA);
+    driver->screen.pixels_out = heap_caps_malloc(driver->screen.w * batch_lines * sizeof(uint16_t), MALLOC_CAP_DMA);
     if (desc->pixel_bytes == 3) {
-        driver->screen.bytes = heap_caps_malloc(driver->screen.w * 3, MALLOC_CAP_DMA);
-        driver->screen.bytes_out = heap_caps_malloc(driver->screen.w * 3, MALLOC_CAP_DMA);
+        driver->screen.bytes = heap_caps_malloc(driver->screen.w * batch_lines * 3, MALLOC_CAP_DMA);
+        driver->screen.bytes_out = heap_caps_malloc(driver->screen.w * batch_lines * 3, MALLOC_CAP_DMA);
     }
 
     driver->display_args.messages_queue = xQueueCreate(32, sizeof(Message *));

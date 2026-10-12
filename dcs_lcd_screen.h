@@ -30,6 +30,9 @@ struct DCSLCDScreen
     int h;
     int16_t x_offset;
     int16_t y_offset;
+    // Scanlines per SPI transaction.
+    int batch_lines;
+    // Two buffers of batch_lines scanlines each.
     uint16_t *pixels;
     uint16_t *pixels_out;
 
