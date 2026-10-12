@@ -350,8 +350,8 @@ include a background rectangle as the last item for any other background color. 
 command paints outside of the display list; the area it touches is repainted by the next `update`.
 
 Image pixels are never compared: an image counts as changed whenever it comes from a different
-binary, so keep and reuse the same binary across updates. Text rendered with a ufont and binaries
-below the heap binary threshold (less than 32 bytes on the ESP32) repaint on every update.
+binary, so keep and reuse the same binary across updates. Binaries below the heap binary threshold
+(less than 32 bytes on the ESP32) repaint on every update.
 
 E-paper panels do not support partial refresh and always redraw the whole panel.
 

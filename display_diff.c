@@ -54,10 +54,14 @@ bool display_diff_items_equal(const BaseDisplayItem *a, const BaseDisplayItem *b
         }
 
         case PrimitiveImage:
-            // TODO: ufont text is rasterized into a new buffer on every update, so it never
-            // compares equal; keep the source string and font handle in the item and compare
-            // those instead.
             return a->data.image_data.pix == b->data.image_data.pix;
+
+        case PrimitiveTextImage: {
+            const struct TextImageSource *src_a = a->data.text_image_data.source;
+            const struct TextImageSource *src_b = b->data.text_image_data.source;
+            return src_a->font == src_b->font && src_a->font_generation == src_b->font_generation
+                && src_a->fgcolor == src_b->fgcolor && strcmp(src_a->text, src_b->text) == 0;
+        }
 
         case PrimitiveScaledCroppedImage: {
             const struct ImageDataWithSize *img_a = &a->data.image_data_with_size;

@@ -36,6 +36,12 @@
 #define MAX_ITEMS 16
 #define POOL_IMG_SIZE 6
 #define POOL_LEN 6
+#define UFONT_TEXTS 4
+#define UFONT_FONTS 2
+#define UFONT_GENERATIONS 2
+#define UFONT_COLORS 2
+#define FONT_A ((term) 0x10B)
+#define FONT_B ((term) 0x14B)
 
 static int failures = 0;
 
@@ -87,6 +93,70 @@ static long damage_area(const struct DisplayDamage *damage)
     return area;
 }
 
+// --- allocations a test frees when done ---
+
+struct Owned
+{
+    char *ptrs[64];
+    size_t len;
+    struct ShapeData *shapes[64];
+    size_t shapes_len;
+    struct TextImageSource *sources[64];
+    size_t sources_len;
+};
+
+static struct ShapeData *owned_shape(struct Owned *owned, struct ShapeData *shape)
+{
+    if (shape != NULL && owned->shapes_len < 64) {
+        owned->shapes[owned->shapes_len++] = shape;
+    }
+
+    return shape;
+}
+
+static char *owned_copy(struct Owned *owned, const char *src, size_t size)
+{
+    char *copy = malloc(size);
+    memcpy(copy, src, size);
+    if (owned->len < 64) {
+        owned->ptrs[owned->len++] = copy;
+    }
+
+    return copy;
+}
+
+static const struct TextImageSource *owned_source(struct Owned *owned, const char *text, term font,
+    uint32_t generation, uint32_t fgcolor)
+{
+    size_t text_size = strlen(text) + 1;
+    struct TextImageSource *source = malloc(sizeof(*source) + text_size);
+    source->font = font;
+    source->font_generation = generation;
+    source->fgcolor = fgcolor;
+    memcpy(source->text, text, text_size);
+    if (owned->sources_len < 64) {
+        owned->sources[owned->sources_len++] = source;
+    }
+
+    return source;
+}
+
+static void owned_free(struct Owned *owned)
+{
+    for (size_t i = 0; i < owned->len; i++) {
+        free(owned->ptrs[i]);
+    }
+    owned->len = 0;
+    for (size_t i = 0; i < owned->shapes_len; i++) {
+        shape_destroy(owned->shapes[i]);
+    }
+    owned->shapes_len = 0;
+    for (size_t i = 0; i < owned->sources_len; i++) {
+        free(owned->sources[i]);
+    }
+    owned->sources_len = 0;
+}
+
 // --- item constructors ---
 
 static BaseDisplayItem make_rect(int x, int y, int w, int h, uint32_t rgb)
@@ -130,6 +200,23 @@ static BaseDisplayItem make_image(int x, int y, uint32_t bg, int w, int h, const
     item.height = h;
     item.brcolor = bg;
     item.data.image_data.pix = pix;
+
+    return item;
+}
+
+static BaseDisplayItem make_ufont_text(int x, int y, uint32_t bg, int w, int h, const char *pix,
+    const char *text, term font, uint32_t generation, uint32_t fg, struct Owned *owned)
+{
+    BaseDisplayItem item;
+    memset(&item, 0, sizeof(item));
+    item.primitive = PrimitiveTextImage;
+    item.x = x;
+    item.y = y;
+    item.width = w;
+    item.height = h;
+    item.brcolor = bg;
+    item.data.text_image_data.image.pix = pix;
+    item.data.text_image_data.source = owned_source(owned, text, font, generation, fg << 8 | 0xFF);
 
     return item;
 }
@@ -239,7 +326,8 @@ static uint64_t item_color_at(const BaseDisplayItem *item, int x, int y)
             return item->brcolor != 0 ? item->brcolor : TRANSPARENT;
         }
 
-        case PrimitiveImage: {
+        case PrimitiveImage:
+        case PrimitiveTextImage: {
             uint32_t rgba = read_rgba(item->data.image_data.pix, (size_t) dy * item->width + dx);
             return image_pixel_color(rgba, item->brcolor);
         }
@@ -309,17 +397,35 @@ static bool same_covering_sequence(const BaseDisplayItem old_items[], size_t old
 
 static const char *const texts[] = { "", "A", "AB", "BA", "ABC" };
 static char pool[POOL_LEN][POOL_IMG_SIZE * POOL_IMG_SIZE * 4];
+// Stand-in for the rasterizer: the pixels of a ufont text are a function of its
+// text, font, font generation and color.
+static char ufont_pool[UFONT_TEXTS][UFONT_FONTS][UFONT_GENERATIONS][UFONT_COLORS]
+                      [POOL_IMG_SIZE * POOL_IMG_SIZE * 4];
+
+static void random_pixels(char *buf)
+{
+    for (int j = 0; j < POOL_IMG_SIZE * POOL_IMG_SIZE; j++) {
+        uint8_t *p = (uint8_t *) &buf[j * 4];
+        p[0] = rand() & 0xFF;
+        p[1] = rand() & 0xFF;
+        p[2] = rand() & 0xFF;
+        int alpha_kind = rand() % 3;
+        p[3] = alpha_kind == 0 ? 0 : (alpha_kind == 1 ? 0x80 : 0xFF);
+    }
+}
 
 static void init_pool(void)
 {
     for (int i = 0; i < POOL_LEN; i++) {
-        for (int j = 0; j < POOL_IMG_SIZE * POOL_IMG_SIZE; j++) {
-            uint8_t *p = (uint8_t *) &pool[i][j * 4];
-            p[0] = rand() & 0xFF;
-            p[1] = rand() & 0xFF;
-            p[2] = rand() & 0xFF;
-            int alpha_kind = rand() % 3;
-            p[3] = alpha_kind == 0 ? 0 : (alpha_kind == 1 ? 0x80 : 0xFF);
+        random_pixels(pool[i]);
+    }
+    for (int t = 0; t < UFONT_TEXTS; t++) {
+        for (int f = 0; f < UFONT_FONTS; f++) {
+            for (int g = 0; g < UFONT_GENERATIONS; g++) {
+                for (int c = 0; c < UFONT_COLORS; c++) {
+                    random_pixels(ufont_pool[t][f][g][c]);
+                }
+            }
         }
     }
 }
@@ -368,6 +474,28 @@ static void test_items_equal(void)
     CHECK(display_diff_items_equal(&i2, &i3));
     i3 = make_image(3, 3, 0, 0, 0, pool[1]);
     CHECK(!display_diff_items_equal(&i2, &i3));
+
+    // ufont text gets a new buffer on every update: it compares by text, font,
+    // font generation and color.
+    struct Owned owned = { .len = 0, .shapes_len = 0, .sources_len = 0 };
+    BaseDisplayItem u1 = make_ufont_text(3, 3, 0, 6, 6, pool[0], "AB", FONT_A, 1, 0xFF0000, &owned);
+    BaseDisplayItem u2 = make_ufont_text(3, 3, 0, 6, 6, copy, text_copy, FONT_A, 1, 0xFF0000, &owned);
+    CHECK(display_diff_items_equal(&u1, &u2));
+    u2 = make_ufont_text(3, 3, 0, 6, 6, copy, "BA", FONT_A, 1, 0xFF0000, &owned);
+    CHECK(!display_diff_items_equal(&u1, &u2));
+    u2 = make_ufont_text(3, 3, 0, 6, 6, copy, "AB", FONT_B, 1, 0xFF0000, &owned);
+    CHECK(!display_diff_items_equal(&u1, &u2));
+    u2 = make_ufont_text(3, 3, 0, 6, 6, copy, "AB", FONT_A, 2, 0xFF0000, &owned);
+    CHECK(!display_diff_items_equal(&u1, &u2));
+    u2 = make_ufont_text(3, 3, 0, 6, 6, copy, "AB", FONT_A, 1, 0xFF0001, &owned);
+    CHECK(!display_diff_items_equal(&u1, &u2));
+    u2 = make_ufont_text(3, 3, 0xFF, 6, 6, copy, "AB", FONT_A, 1, 0xFF0000, &owned);
+    CHECK(!display_diff_items_equal(&u1, &u2));
+    u2 = make_ufont_text(3, 3, 0, 6, 5, copy, "AB", FONT_A, 1, 0xFF0000, &owned);
+    CHECK(!display_diff_items_equal(&u1, &u2));
+    i2 = make_image(3, 3, 0, 6, 6, copy);
+    CHECK(!display_diff_items_equal(&u1, &i2));
+    owned_free(&owned);
 
     BaseDisplayItem s1 = make_scaled(0, 0, 8, 8, 0, 1, 1, 2, 2, 6, 6, pool[2]);
     BaseDisplayItem s2 = s1;
@@ -518,49 +646,26 @@ static void test_diff_scenarios(void)
     BaseDisplayItem list13[] = { off, inv, label, icon, bg };
     compute(list1, 3, list13, 5, &damage);
     CHECK(display_damage_is_empty(&damage));
+
+    // ufont text rasterized again into another buffer: nothing to repaint. The
+    // same text after a font was registered or unregistered: repainted.
+    memcpy(copy, pool[4], sizeof(copy));
+    struct Owned owned = { .len = 0, .shapes_len = 0, .sources_len = 0 };
+    BaseDisplayItem ulabel = make_ufont_text(4, 20, 0, 6, 6, pool[4], "AB", FONT_A, 1, 0x000000, &owned);
+    BaseDisplayItem ulabel_again = make_ufont_text(4, 20, 0, 6, 6, copy, "AB", FONT_A, 1, 0x000000, &owned);
+    BaseDisplayItem ulabel_refont = make_ufont_text(4, 20, 0, 6, 6, copy, "AB", FONT_A, 2, 0x000000, &owned);
+    BaseDisplayItem list14[] = { ulabel, icon, bg };
+    BaseDisplayItem list15[] = { ulabel_again, icon, bg };
+    compute(list14, 3, list15, 3, &damage);
+    CHECK(display_damage_is_empty(&damage));
+    BaseDisplayItem list16[] = { ulabel_refont, icon, bg };
+    compute(list14, 3, list16, 3, &damage);
+    CHECK(damage_area(&damage) == 36);
+    CHECK(damage_covers_rect(&damage, 4, 20, 6, 6));
+    owned_free(&owned);
 }
 
 // --- randomized property test ---
-
-struct Owned
-{
-    char *ptrs[64];
-    size_t len;
-    struct ShapeData *shapes[64];
-    size_t shapes_len;
-};
-
-static struct ShapeData *owned_shape(struct Owned *owned, struct ShapeData *shape)
-{
-    if (shape != NULL && owned->shapes_len < 64) {
-        owned->shapes[owned->shapes_len++] = shape;
-    }
-
-    return shape;
-}
-
-static char *owned_copy(struct Owned *owned, const char *src, size_t size)
-{
-    char *copy = malloc(size);
-    memcpy(copy, src, size);
-    if (owned->len < 64) {
-        owned->ptrs[owned->len++] = copy;
-    }
-
-    return copy;
-}
-
-static void owned_free(struct Owned *owned)
-{
-    for (size_t i = 0; i < owned->len; i++) {
-        free(owned->ptrs[i]);
-    }
-    owned->len = 0;
-    for (size_t i = 0; i < owned->shapes_len; i++) {
-        shape_destroy(owned->shapes[i]);
-    }
-    owned->shapes_len = 0;
-}
 
 static struct ShapeData *random_shape(struct Owned *owned)
 {
@@ -609,11 +714,39 @@ static uint32_t random_bg(void)
     return palette[rand() % 4] << 8 | 0xFF;
 }
 
+static const char *ufont_pixels(const BaseDisplayItem *item)
+{
+    const struct TextImageSource *src = item->data.text_image_data.source;
+    int t = 0;
+    while (strcmp(texts[1 + t], src->text) != 0) {
+        t++;
+    }
+    int c = src->fgcolor == (palette[0] << 8 | 0xFF) ? 0 : 1;
+
+    return ufont_pool[t][src->font - FONT_A][src->font_generation - 1][c];
+}
+
+static BaseDisplayItem random_ufont_text(int x, int y, struct Owned *owned)
+{
+    int t = rand() % UFONT_TEXTS;
+    int f = rand() % UFONT_FONTS;
+    int g = rand() % UFONT_GENERATIONS;
+    int c = rand() % UFONT_COLORS;
+    const char *pix = ufont_pool[t][f][g][c];
+    if (rand() % 2 == 0) {
+        pix = owned_copy(owned, pix, sizeof(pool[0]));
+    }
+    int w = 1 + rand() % POOL_IMG_SIZE;
+    int h = 1 + rand() % POOL_IMG_SIZE;
+
+    return make_ufont_text(x, y, random_bg(), w, h, pix, texts[1 + t], FONT_A + f, 1 + g, palette[c], owned);
+}
+
 static BaseDisplayItem random_item(struct Owned *owned)
 {
     int x = rand() % (SCREEN_W + 16) - 8;
     int y = rand() % (SCREEN_H + 16) - 8;
-    int kind = rand() % 20;
+    int kind = rand() % 22;
 
     if (kind < 7) {
         return make_rect(x, y, rand() % 24, rand() % 20, palette[rand() % 4]);
@@ -656,6 +789,9 @@ static BaseDisplayItem random_item(struct Owned *owned)
         }
         return make_rect(x, y, rand() % 24, rand() % 20, palette[rand() % 4]);
     }
+    if (kind < 21) {
+        return random_ufont_text(x, y, owned);
+    }
 
     BaseDisplayItem invalid;
     memset(&invalid, 0, sizeof(invalid));
@@ -683,7 +819,7 @@ static bool mutate(const BaseDisplayItem old_items[], size_t old_len, BaseDispla
 
     int ops = rand() % 4;
     for (int op = 0; op < ops; op++) {
-        int kind = rand() % 7;
+        int kind = rand() % 8;
         if (kind == 0 && len > 0) {
             new_items[rand() % len] = random_item(owned);
             changed = true;
@@ -711,12 +847,16 @@ static bool mutate(const BaseDisplayItem old_items[], size_t old_len, BaseDispla
             len++;
             changed = true;
         } else if (kind == 5 && len > 0) {
-            // Same pixels through another buffer: counts as a change.
+            // Same pixels through another buffer: counts as a change for an image, not for
+            // ufont text, which is rasterized anew on every update.
             size_t at = rand() % len;
             BaseDisplayItem *item = &new_items[at];
             if (item->primitive == PrimitiveImage && item->data.image_data.pix != NULL) {
                 item->data.image_data.pix = owned_copy(owned, item->data.image_data.pix, sizeof(pool[0]));
                 changed = true;
+            } else if (item->primitive == PrimitiveTextImage) {
+                struct ImageData *img = &item->data.text_image_data.image;
+                img->pix = owned_copy(owned, img->pix, sizeof(pool[0]));
             } else if (item->primitive == PrimitiveScaledCroppedImage) {
                 item->data.image_data_with_size.pix
                     = owned_copy(owned, item->data.image_data_with_size.pix, sizeof(pool[0]));
@@ -731,6 +871,20 @@ static bool mutate(const BaseDisplayItem old_items[], size_t old_len, BaseDispla
             new_items[at].x += rand() % 5 - 2;
             new_items[at].y += rand() % 5 - 2;
             changed = true;
+        } else if (kind == 7) {
+            // A font was registered or unregistered: ufont text is rasterized anew at the
+            // next generation, with the pixels of that generation.
+            for (size_t at = 0; at < len; at++) {
+                struct TextImageData *img = &new_items[at].data.text_image_data;
+                if (new_items[at].primitive != PrimitiveTextImage
+                    || img->source->font_generation >= UFONT_GENERATIONS) {
+                    continue;
+                }
+                img->source = owned_source(owned, img->source->text, img->source->font,
+                    img->source->font_generation + 1, img->source->fgcolor);
+                img->image.pix = ufont_pixels(&new_items[at]);
+                changed = true;
+            }
         }
     }
 

@@ -514,20 +514,33 @@ static const char *init_text_item(BaseDisplayItem *item, term req, Context *ctx)
         int text_x = 0;
         int text_y = loaded_font->ascender;
         enum EpdDrawError res = epd_write_default(loaded_font, text, &text_x, &text_y, &surface);
-        free(text);
         if (UNLIKELY(res != EPD_DRAW_SUCCESS)) {
+            free(text);
             free(surface.buffer);
             return "text drawing failed";
         }
 
-        item->primitive = PrimitiveImage;
+        size_t text_size = strlen(text) + 1;
+        struct TextImageSource *source = malloc(sizeof(*source) + text_size);
+        if (IS_NULL_PTR(source)) {
+            free(text);
+            free(surface.buffer);
+            return "out of memory";
+        }
+        source->font = font;
+        source->font_generation = ufont_manager_generation(ufont_manager);
+        source->fgcolor = fgcolor;
+        memcpy(source->text, text, text_size);
+        free(text);
+
+        item->primitive = PrimitiveTextImage;
         item->x = clamp_coord(x);
         item->y = clamp_coord(y);
         item->width = surface.width;
         item->height = surface.height;
         item->brcolor = brcolor;
-        item->data.image_data.pix = surface.buffer;
-        item->owns_data = true;
+        item->data.text_image_data.image.pix = surface.buffer;
+        item->data.text_image_data.source = source;
 #else
         fprintf(stderr, "unsupported font: ");
         term_display(stderr, font, ctx);
@@ -667,10 +680,9 @@ void display_items_delete(BaseDisplayItem items[], size_t items_len)
         BaseDisplayItem *item = &items[i];
 
         switch (item->primitive) {
-            case PrimitiveImage:
-                if (item->owns_data) {
-                    free((void *) item->data.image_data.pix);
-                }
+            case PrimitiveTextImage:
+                free((void *) item->data.text_image_data.image.pix);
+                free((void *) item->data.text_image_data.source);
                 break;
 
             case PrimitiveRect:

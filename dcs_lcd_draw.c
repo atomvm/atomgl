@@ -270,6 +270,7 @@ int dcs_lcd_draw_x(const struct DCSLCDScreen *screen,
         int drawn_pixels = 0;
         switch (item->primitive) {
             case PrimitiveImage:
+            case PrimitiveTextImage:
                 drawn_pixels = dcs_lcd_draw_image_x(screen, xpos, ypos, max_line_len, item);
                 break;
 

@@ -362,6 +362,7 @@ int mono_draw_x(const struct MonoScreen *screen,
         int drawn_pixels = 0;
         switch (item->primitive) {
             case PrimitiveImage:
+            case PrimitiveTextImage:
                 //fprintf(stderr, "Image\n");
                 drawn_pixels = mono_draw_image_x(screen, line_buf, xpos, ypos, max_line_len, item);
                 break;

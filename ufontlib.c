@@ -535,12 +535,14 @@ typedef struct
 struct UFontManager
 {
     struct UFListHead font_list;
+    uint32_t generation;
 };
 
 UFontManager *ufont_manager_new()
 {
     UFontManager *ufont_manager = malloc(sizeof(UFontManager));
     uflist_init(&ufont_manager->font_list);
+    ufont_manager->generation = 0;
 
     return ufont_manager;
 }
@@ -553,6 +555,7 @@ void ufont_manager_register(UFontManager *ufont_manager, const char *handle, Epd
     ufont->font = font;
     ufont->owned_data = owned_data;
     uflist_append(&ufont_manager->font_list, &ufont->list_head);
+    ufont_manager->generation++;
 }
 
 bool ufont_manager_unregister(UFontManager *ufont_manager, const char *handle)
@@ -567,6 +570,7 @@ bool ufont_manager_unregister(UFontManager *ufont_manager, const char *handle)
             free(ufont->font);
             free(ufont->owned_data);
             free(ufont);
+            ufont_manager->generation++;
             return true;
         }
     }
@@ -585,6 +589,11 @@ EpdFont *ufont_manager_find_by_handle(UFontManager *ufont_manager, const char *h
     }
 
     return NULL;
+}
+
+uint32_t ufont_manager_generation(const UFontManager *ufont_manager)
+{
+    return ufont_manager->generation;
 }
 
 #ifdef __ORDER_LITTLE_ENDIAN__

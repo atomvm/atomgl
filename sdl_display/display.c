@@ -343,6 +343,7 @@ static int draw_x(int xpos, int ypos, int x_end, BaseDisplayItem *row)
         int drawn_pixels = 0;
         switch (item->primitive) {
             case PrimitiveImage:
+            case PrimitiveTextImage:
                 drawn_pixels = draw_image_x(xpos, ypos, max_line_len, item);
                 break;
 

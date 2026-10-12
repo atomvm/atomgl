@@ -21,7 +21,8 @@
 %% Pushes a sequence of display lists that exercises the partial repaint
 %% logic: items changing in place, appearing, disappearing, moving, changing
 %% z-order, identical frames, off screen and invalid items, many changes at
-%% once. Run with the SDL driver in verify mode, headless if needed:
+%% once, text in a ufont that gets replaced. Run with the SDL driver in verify
+%% mode, headless if needed:
 %%
 %%   AVM_SDL_DISPLAY_VERIFY_DAMAGE=1 SDL_VIDEODRIVER=dummy \
 %%       AtomVM test_damage.beam /path/to/atomvmlib.avm
@@ -43,7 +44,8 @@ start() ->
     Tiny2 = image(2, 2, fun(_X, _Y) -> [255, 0, 0, 255] end),
     Scenes = scenes(Big, Tiny, Tiny2),
     Failed = run(Display, Scenes, 1, 0),
-    erlang:display({test_damage, done, length(Scenes), failed, Failed}),
+    Frames = length([Scene || Scene <- Scenes, is_list(Scene)]),
+    erlang:display({test_damage, done, Frames, failed, Failed}),
     case Failed of
         0 -> ok;
         _ -> {error, {failed, Failed}}
@@ -60,11 +62,52 @@ image(W, H, Fun) ->
 bg() ->
     {rect, 0, 0, ?WIDTH, ?HEIGHT, 16#808080}.
 
+%% A ufont with 4x5 pixel glyphs for $A, $B, ... given as rows of "X" (ink) and "." (blank).
+ufont(Glyphs) ->
+    Count = length(Glyphs),
+    Header = <<1:32/little, 0, 6:16/little, 5:16/little, 0:16/little>>,
+    GlyphRecords = [
+        <<4:16/little, 5:16/little, 5:16/little, 0:16/little, 5:16/little, 0:32/little,
+            (I * 10):32/little>>
+     || I <- lists:seq(0, Count - 1)
+    ],
+    Intervals = <<$A:32/little, ($A + Count - 1):32/little, 0:32/little>>,
+    Bitmap = [glyph_bitmap(Rows) || Rows <- Glyphs],
+    Body = list_to_binary([
+        chunk("uFH0", Header),
+        chunk("uFP0", GlyphRecords),
+        chunk("uFI0", Intervals),
+        chunk("uFB0", Bitmap)
+    ]),
+    Size = 12 + byte_size(Body),
+    <<"FORM", Size:32/big, "uFL0", Body/binary>>.
+
+chunk(Name, Data) ->
+    Bin = list_to_binary([Data]),
+    Pad = (4 - byte_size(Bin) rem 4) rem 4,
+    [Name, <<(byte_size(Bin)):32/big>>, Bin, lists:duplicate(Pad, 0)].
+
+%% Two pixels per byte, the left one in the low nibble.
+glyph_bitmap(Rows) ->
+    [[ink(P0) bor (ink(P1) bsl 4), ink(P2) bor (ink(P3) bsl 4)] || [P0, P1, P2, P3] <- Rows].
+
+ink($X) -> 15;
+ink($.) -> 0.
+
 grid(Color, Columns) ->
     [{rect, X * 12, Y * 25, 6, 6, Color} || X <- lists:seq(0, Columns - 1), Y <- lists:seq(0, 3)].
 
 scenes(Big, Tiny, Tiny2) ->
     Text = {text, 10, 10, default16px, 16#000000, transparent, <<"Hello">>},
+    FontA = ufont([
+        ["..XX", ".X.X", "XXXX", "X..X", "X..X"],
+        ["XXX.", "X..X", "XXX.", "X..X", "XXX."]
+    ]),
+    FontB = ufont([
+        ["XXXX", "XXXX", "XXXX", "XXXX", "XXXX"],
+        ["X.X.", ".X.X", "X.X.", ".X.X", "X.X."]
+    ]),
+    UText = {text, 20, 60, tiny, 16#FFFF00, transparent, <<"ABBA">>},
     [
         [bg()],
         % identical frame
@@ -127,6 +170,19 @@ scenes(Big, Tiny, Tiny2) ->
         [{scaled_cropped_image, 20, 20, 48, 32, transparent, 0, 0, 2, 2, [flip_x], Big}, bg()],
         [{scaled_cropped_image, 20, 20, 48, 32, transparent, 0, 0, 2, 2, [flip_y], Big}, bg()],
         [{scaled_cropped_image, 20, 20, 48, 32, 16#004000, 0, 0, 2, 2, [flip_x, flip_y], Big}, bg()],
+        % text in a ufont: the same text again, then another text and other colors
+        {register_font, tiny, FontA},
+        [UText, bg()],
+        [UText, bg()],
+        [{text, 20, 60, tiny, 16#FFFF00, transparent, <<"BAAB">>}, bg()],
+        [{text, 20, 60, tiny, 16#00FFFF, 16#400040, <<"BAAB">>}, bg()],
+        [UText, bg()],
+        % the same text after the font was replaced under the same handle, then removed
+        {deregister_font, tiny},
+        {register_font, tiny, FontB},
+        [UText, bg()],
+        {deregister_font, tiny},
+        [UText, bg()],
         % invalid items are reported and ignored
         [
             {rect, 1, 2},
@@ -147,14 +203,18 @@ scenes(Big, Tiny, Tiny2) ->
 
 run(_Display, [], _N, Failed) ->
     Failed;
-run(Display, [Scene | Rest], N, Failed) ->
+run(Display, [Scene | Rest], N, Failed) when is_list(Scene) ->
     case call(Display, {update, Scene}) of
         ok ->
             run(Display, Rest, N + 1, Failed);
         Other ->
             erlang:display({update_failed, N, Other}),
             run(Display, Rest, N + 1, Failed + 1)
-    end.
+    end;
+% a font command between two frames
+run(Display, [Req | Rest], N, Failed) ->
+    ok = call(Display, Req),
+    run(Display, Rest, N, Failed).
 
 call(Port, Req) ->
     Ref = make_ref(),

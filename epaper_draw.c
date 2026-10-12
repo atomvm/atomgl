@@ -337,6 +337,7 @@ int epaper_draw_x(const struct EpaperScreen *screen,
         int drawn_pixels = 0;
         switch (item->primitive) {
             case PrimitiveImage:
+            case PrimitiveTextImage:
                 drawn_pixels = epaper_draw_image_x(screen, line_buf, xpos, ypos, max_line_len, item);
                 break;
 
