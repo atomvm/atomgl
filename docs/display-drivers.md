@@ -441,6 +441,38 @@ epaper_opts = [
 display = :erlang.open_port({:spawn, "display"}, epaper_opts)
 ```
 
+#### Panel Power Switch
+
+Boards that switch the panel's supply (Heltec's Vext rail, Waveshare HAT power
+pins and similar) can hand the controlling GPIO to the port:
+
+| Option | Type | Description | Default |
+|--------|------|-------------|---------|
+| `panel_power` | integer | GPIO that switches the panel supply | Optional; without it the rail is assumed to be always on |
+| `panel_power_active` | atom | `:high` or `:low` active level | `:high` |
+| `panel_power_delay_ms` | integer | Settle time after the rail comes up, before reset/init is sent | 100 |
+
+The driver raises the rail before it resets or initializes the controller, and
+again before any wake sequence, then drops it when a sleep mode declares
+`controller_ram: :lost` — the descriptor has already given up on the
+controller's RAM in that mode, so `{:sleep, :deep_sleep}` becomes the lowest
+power state the board can reach. Modes that declare `:retained` or `:unknown`
+keep the rail up, so the switch can never contradict a descriptor that promises
+retained state.
+
+```elixir
+# Heltec Vision Master E290: the panel is fed from the Vext rail (GPIO 18).
+epaper_opts = [
+  spi_host: spi_host,
+  descriptor: descriptor,
+  cs: 3,
+  dc: 4,
+  reset: 5,
+  busy: 6,
+  panel_power: 18
+]
+```
+
 #### Runtime Refresh Options
 
 When sending updates via the port, you can dynamically choose the refresh mode per frame (rather than being locked to one mode at port creation time):

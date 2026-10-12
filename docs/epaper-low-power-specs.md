@@ -19,6 +19,22 @@ AtomGL `standby`, `sleep`, `deep_sleep`, and `wake` behavior.
 | `waveshare,5in65-acep-7c` | 5.65 inch ACeP 7-color | Waveshare command use / existing AtomGL refresh flow | `0x02`, wait BUSY low | Not exposed by default | `0x02`, wait, `0x07,0xA5` | Hardware reset + init | No partial mode in AtomGL descriptor |
 | `good-display/gdep073e01` | 7.3 inch Spectra 6, 800x480, GDEP073E01-style | `Waveshare_7.3inch-e-Paper-(E)-user-manual.pdf` | `0x02,0x00`; BUSY low while active, high when idle | Not documented | `0x02,0x00`, wait, `0x07,0xA5` | Hardware reset + init | No partial mode in AtomGL descriptor |
 
+## Board power rails
+
+The table above describes what each controller can do on its own. Boards that
+also switch the panel's supply (Heltec's Vext rail, Waveshare HAT power pins)
+report that GPIO to the port as `panel_power`, with `panel_power_active`
+(`:high`/`:low`) and `panel_power_delay_ms` (settle time, 100 ms default).
+
+- The rail is raised before reset/init and before every wake sequence, so the
+  controller is always powered before it is addressed.
+- The rail is dropped when a sleep mode declares `controller_ram: :lost`, since
+  the descriptor already gives up the controller RAM in that mode. Combined,
+  `deep_sleep` + `panel_power` is the lowest power state the board offers.
+- `:retained` and `:unknown` modes keep the rail up, so the switch never
+  contradicts a descriptor that promises retained state.
+- Ports without `panel_power` behave exactly as before (rail assumed on).
+
 ## `good-display/gdep073e01`
 
 Local spec sheet:

@@ -96,6 +96,13 @@ struct EpaperDriver
     int busy_gpio;
     int reset_gpio;
 
+    // Optional board-level panel power switch (e.g. Heltec Vext, Waveshare HAT
+    // power pins): -1 when the panel is permanently powered.
+    int panel_power_gpio;
+    bool panel_power_active_high;
+    bool panel_power_on;
+    uint32_t panel_power_delay_ms;
+
     const struct EPaperDesc *desc;
     struct EPaperDesc term_desc;
     char *term_desc_name;
@@ -184,6 +191,78 @@ static void epaper_delay_ms(uint32_t delay_ms)
         return;
     }
     vTaskDelay((delay_ms + portTICK_PERIOD_MS - 1) / portTICK_PERIOD_MS);
+}
+
+// Board-level panel power switch. Ports may pass `panel_power` (GPIO number),
+// `panel_power_active` (:high by default, :low for inverted switches) and
+// `panel_power_delay_ms` (settle time before the controller is touched, 100 ms
+// by default). Without the option the panel is assumed to be always powered,
+// which is what the desktop/bench panels do.
+#define EPAPER_PANEL_POWER_DEFAULT_DELAY_MS 100
+
+static bool epaper_parse_panel_power(struct EpaperDriver *driver, term opts, Context *ctx)
+{
+    GlobalContext *global = ctx->global;
+
+    term gpio_term = interop_kv_get_value_default(
+        opts, ATOM_STR("\xB", "panel_power"), term_invalid_term(), global);
+    if (gpio_term == term_invalid_term()) {
+        return true;
+    }
+    if (!term_is_integer(gpio_term)) {
+        ESP_LOGE(TAG, "Invalid panel_power option: expected a GPIO number.");
+        return false;
+    }
+    driver->panel_power_gpio = (int) term_to_int(gpio_term);
+    driver->panel_power_active_high = true;
+    driver->panel_power_delay_ms = EPAPER_PANEL_POWER_DEFAULT_DELAY_MS;
+
+    term active_term = interop_kv_get_value_default(
+        opts, ATOM_STR("\x12", "panel_power_active"), term_invalid_term(), global);
+    if (active_term != term_invalid_term()) {
+        if (active_term == context_make_atom(ctx, ATOM_STR("\x4", "high"))) {
+            driver->panel_power_active_high = true;
+        } else if (active_term == context_make_atom(ctx, ATOM_STR("\x3", "low"))) {
+            driver->panel_power_active_high = false;
+        } else {
+            ESP_LOGE(TAG, "Invalid panel_power_active option: expected high or low.");
+            return false;
+        }
+    }
+
+    term delay_term = interop_kv_get_value_default(
+        opts, ATOM_STR("\x14", "panel_power_delay_ms"), term_invalid_term(), global);
+    if (delay_term != term_invalid_term()) {
+        avm_int_t delay_ms = term_is_integer(delay_term) ? term_to_int(delay_term) : -1;
+        if (delay_ms < 0) {
+            ESP_LOGE(TAG, "Invalid panel_power_delay_ms option: expected milliseconds >= 0.");
+            return false;
+        }
+        driver->panel_power_delay_ms = (uint32_t) delay_ms;
+    }
+
+    ESP_LOGI(TAG, "Panel power switch: GPIO%d, %s, %ums settle delay.",
+        driver->panel_power_gpio, driver->panel_power_active_high ? "active high" : "active low",
+        (unsigned) driver->panel_power_delay_ms);
+    return true;
+}
+
+// Raises or drops the panel rail. Idempotent, so callers may assert power on
+// every path that is about to talk to the controller.
+static void epaper_set_panel_power(struct EpaperDriver *driver, bool on)
+{
+    if (driver->panel_power_gpio < 0 || on == driver->panel_power_on) {
+        return;
+    }
+
+    int on_level = driver->panel_power_active_high ? 1 : 0;
+    driver->panel_power_on = on;
+    gpio_set_direction(driver->panel_power_gpio, GPIO_MODE_OUTPUT);
+    gpio_set_level(driver->panel_power_gpio, on ? on_level : !on_level);
+    if (on) {
+        // The controller must be powered before it accepts reset and commands.
+        epaper_delay_ms(driver->panel_power_delay_ms);
+    }
 }
 
 static void wait_busy_level(struct EpaperDriver *driver, int level)
@@ -933,6 +1012,9 @@ static bool epaper_wake_if_asleep(struct EpaperDriver *driver)
     }
 
     const struct EPaperSleepMode *mode = driver->state.asleep_mode;
+    // A sleep mode with lost controller RAM also drops the panel rail, so it
+    // has to be raised (and allowed to settle) before the wake sequence runs.
+    epaper_set_panel_power(driver, true);
     if (!epaper_run_wake_sequence(driver, mode)) {
         ESP_LOGW(TAG, "E-paper wake sequence failed for %s.", driver->desc->name);
         return false;
@@ -983,6 +1065,11 @@ static bool do_sleep(Context *ctx, term mode_term)
     epaper_clear_after_wake_policy(driver);
     if (mode->host_prev_frame == EPAPER_HOST_PREV_FRAME_INVALIDATE) {
         driver->state.prev_valid = false;
+    }
+    if (mode->controller_ram == EPAPER_CONTROLLER_RAM_LOST) {
+        // The descriptor says the controller keeps nothing across this mode, so
+        // the panel rail can stay down until something wakes it again.
+        epaper_set_panel_power(driver, false);
     }
     return true;
 }
@@ -1742,6 +1829,9 @@ static void epaper_free_init_failed_driver(struct EpaperDriver *driver,
     free(driver->prev_frame);
     driver->prev_frame = NULL;
     epaper_free_descriptor_override(driver);
+    // Nobody can talk to the panel through this port any more, so leave the
+    // rail off instead of powering a controller that is not being driven.
+    epaper_set_panel_power(driver, false);
     free(driver);
 }
 
@@ -2582,6 +2672,9 @@ static bool display_spi_init(Context *ctx, term opts)
         ESP_LOGE(TAG, "Failed init: unable to allocate driver state.");
         return false;
     }
+    // No panel power switch unless the port asks for one: GPIO 0 must never be
+    // driven by an unconfigured rail.
+    driver->panel_power_gpio = -1;
 
     driver->desc = desc;
     driver->ctx = ctx;
@@ -2649,6 +2742,15 @@ static bool display_spi_init(Context *ctx, term opts)
         gpio_set_pull_mode(driver->busy_gpio, GPIO_PULLUP_ENABLE);
         gpio_set_level(driver->bus.dc_gpio, 0);
     }
+
+    // Raise the panel rail (when the board has one) before reset or any
+    // controller command leaves the port.
+    if (!epaper_parse_panel_power(driver, opts, ctx)) {
+        ESP_LOGE(TAG, "Failed init: invalid panel power configuration.");
+        epaper_free_init_failed_driver(driver, spi_device_added);
+        return false;
+    }
+    epaper_set_panel_power(driver, true);
 
     driver->state.prev_valid = false;
     driver->state.fast_refresh_count = 0;
