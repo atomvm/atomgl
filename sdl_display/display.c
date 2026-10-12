@@ -556,6 +556,16 @@ static void process_message(Context *ctx)
         }
         free(handle);
 
+    } else if (cmd == globalcontext_make_atom(ctx->global, "\xF" "deregister_font")) {
+        if (term_get_tuple_arity(req) != 2 || !term_is_atom(term_get_tuple_element(req, 1))) {
+            goto invalid_message;
+        }
+        char *handle = interop_atom_to_string(ctx, term_get_tuple_element(req, 1));
+        if (handle != NULL) {
+            ufont_manager_unregister(ufont_manager, handle);
+        }
+        free(handle);
+
     } else {
         fprintf(stderr, "unexpected command: ");
         term_display(stderr, req, ctx);
