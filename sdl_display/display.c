@@ -22,6 +22,7 @@
 #include <limits.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -40,6 +41,8 @@
 #define BPP 4
 #define DEPTH 32
 
+#include "../display_damage.h"
+#include "../display_frame.h"
 #include "../display_items.h"
 #include "../display_message.h"
 #include "../font_data.h"
@@ -89,6 +92,14 @@ UFontManager *ufont_manager;
 static NativeHandlerResult consume_display_mailbox(Context *ctx);
 static void *display_loop();
 
+static struct DisplayFrame frame;
+
+// Debug check enabled by AVM_SDL_DISPLAY_VERIFY_DAMAGE, see README.Md.
+static bool verify_damage = false;
+static void *verify_pixels = NULL;
+static int verify_frames = 0;
+static int verify_failed_frames = 0;
+
 static void destroy_message(Message *m, GlobalContext *global)
 {
     BEGIN_WITH_STACK_HEAP(1, temp_heap);
@@ -117,6 +128,10 @@ static int draw_image_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *i
 
     int width = item->width;
     const char *data = item->data.image_data.pix;
+    if (data == NULL) {
+        // A ufont text nobody rasterized, see display_items_rasterize()
+        return -max_line_len;
+    }
 
     int drawn_pixels = 0;
 
@@ -309,9 +324,9 @@ static int draw_text_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *it
     return drawn_pixels;
 }
 
-static int draw_x(int xpos, int ypos, BaseDisplayItem *row)
+static int draw_x(int xpos, int ypos, int x_end, BaseDisplayItem *row)
 {
-    int line_len = screen->w - xpos;
+    int line_len = x_end - xpos;
     int transparent_run = INT_MAX;
 
     for (BaseDisplayItem *item = row; item != NULL; item = item->next) {
@@ -332,6 +347,7 @@ static int draw_x(int xpos, int ypos, BaseDisplayItem *row)
         int drawn_pixels = 0;
         switch (item->primitive) {
             case PrimitiveImage:
+            case PrimitiveTextImage:
                 drawn_pixels = draw_image_x(xpos, ypos, max_line_len, item);
                 break;
 
@@ -372,29 +388,115 @@ static int draw_x(int xpos, int ypos, BaseDisplayItem *row)
     return 1;
 }
 
-static void do_update(Context *ctx, term display_list)
+// Pixels that no item covers are black, so the result only depends on the items.
+static void render_rect(const struct DisplayRect *rect, BaseDisplayItem items[], size_t items_len)
 {
-    BaseDisplayItem *items;
-    size_t len;
-    if (UNLIKELY(display_items_new_list(display_list, &items, &len, ctx) != DisplayItemsOk)) {
-        return;
-    }
+    Uint32 black = uint32_color_to_surface(screen, 0x000000FF);
+    int x_end = rect->x + rect->width;
 
-    for (int ypos = 0; ypos < screen->h; ypos++) {
-        BaseDisplayItem *row = display_items_row(items, len, ypos);
-        int xpos = 0;
-        while (xpos < screen->w) {
-            xpos += draw_x(xpos, ypos, row);
+    for (int ypos = rect->y; ypos < rect->y + rect->height; ypos++) {
+        Uint32 *line = (Uint32 *) (((uint8_t *) screen->pixels) + screen->w * ypos * BPP);
+        for (int xpos = rect->x; xpos < x_end; xpos++) {
+            line[xpos] = black;
+        }
+
+        BaseDisplayItem *row = display_items_row(items, items_len, ypos);
+        int xpos = rect->x;
+        while (xpos < x_end) {
+            xpos += draw_x(xpos, ypos, x_end, row);
+        }
+    }
+}
+
+static void blit_rect(const struct DisplayRect *rect)
+{
+    int scale = screen->scale;
+
+    for (int ypos = rect->y * scale; ypos < (rect->y + rect->height) * scale; ypos++) {
+        for (int xpos = rect->x * scale; xpos < (rect->x + rect->width) * scale; xpos++) {
+            Uint32 *srcpix = (Uint32 *) (((uint8_t *) screen->pixels) + screen->w * (ypos / scale) * BPP + (xpos / scale) * BPP);
+            Uint32 *destpix = (Uint32 *) (((uint8_t *) surface->pixels) + surface->w * ypos * BPP + xpos * BPP);
+            *destpix = *srcpix;
+        }
+    }
+}
+
+static bool verify_update(const struct DisplayUpdate *update, Context *ctx)
+{
+    size_t size = screen->w * screen->h * BPP;
+    if (verify_pixels == NULL) {
+        verify_pixels = malloc(size);
+        if (verify_pixels == NULL) {
+            fprintf(stderr, "damage verify: cannot allocate scratch buffer\n");
+            verify_damage = false;
+            return true;
         }
     }
 
-    display_items_delete(items, len);
+    display_items_rasterize(update->items, update->items_len, NULL, ctx);
+    void *saved = screen->pixels;
+    screen->pixels = verify_pixels;
+    struct DisplayRect full = { .x = 0, .y = 0, .width = screen->w, .height = screen->h };
+    render_rect(&full, update->items, update->items_len);
+    screen->pixels = saved;
+
+    const Uint32 *expected = verify_pixels;
+    const Uint32 *actual = screen->pixels;
+    int mismatches = 0;
+    for (int ypos = 0; ypos < screen->h; ypos++) {
+        for (int xpos = 0; xpos < screen->w; xpos++) {
+            size_t index = ypos * screen->w + xpos;
+            if (expected[index] != actual[index]) {
+                if (mismatches < 5) {
+                    fprintf(stderr, "damage verify: pixel (%i, %i) is 0x%08X, expected 0x%08X\n",
+                        xpos, ypos, (unsigned) actual[index], (unsigned) expected[index]);
+                }
+                mismatches++;
+            }
+        }
+    }
+
+    verify_frames++;
+    if (mismatches != 0) {
+        verify_failed_frames++;
+    }
+    fprintf(stderr, "damage verify: frame %i %s (%i items, %i rects, %i mismatching pixels, %i failed frames so far)\n",
+        verify_frames, mismatches ? "FAILED" : "ok", (int) update->items_len,
+        (int) update->damage.rects_len, mismatches, verify_failed_frames);
+    return mismatches == 0;
+}
+
+// Returns true when `message` has been retained as the frame's message.
+// `verified` is cleared when the verify mode found a mismatch.
+static bool do_update(Context *ctx, Message *message, term display_list, bool *verified)
+{
+    struct DisplayUpdate update;
+    if (!display_frame_begin_update(&frame, display_list, ctx, &update)) {
+        return false;
+    }
+
+    display_items_rasterize(update.items, update.items_len, &update.damage, ctx);
+
+    for (size_t i = 0; i < update.damage.rects_len; i++) {
+        render_rect(&update.damage.rects[i], update.items, update.items_len);
+        blit_rect(&update.damage.rects[i]);
+    }
+
+    if (verify_damage) {
+        *verified = verify_update(&update, ctx);
+    }
+
+    display_frame_commit(&frame, &update, message, ctx->global);
+
+    return true;
 }
 
 static void process_message(Context *ctx)
 {
     MailboxMessage *mbox_msg = mailbox_take_message(&ctx->mailbox);
     Message *message = CONTAINER_OF(mbox_msg, Message, base);
+    bool retained = false;
+    bool verified = true;
 
     GenMessage gen_message;
     if (UNLIKELY(port_parse_gen_message(message->message, &gen_message) != GenCallMessage)) {
@@ -408,25 +510,21 @@ static void process_message(Context *ctx)
 
     term cmd = term_get_tuple_element(req, 0);
 
-    if (SDL_MUSTLOCK(surface)) {
-        if (SDL_LockSurface(surface) < 0) {
-            return;
-        }
-    }
-
     if (cmd == globalcontext_make_atom(ctx->global, "\x6"
                                       "update")) {
+        if (term_get_tuple_arity(req) != 2) {
+            goto invalid_message;
+        }
         term display_list = term_get_tuple_element(req, 1);
-        do_update(ctx, display_list);
-
-        // Copy and scale up
-        int scale = screen->scale;
-        for (int ypos = 0; ypos < surface->h; ypos++) {
-            for (int xpos = 0; xpos < surface->w; xpos++) {
-                Uint32 *srcpix = (Uint32 *) (((uint8_t *) screen->pixels) + screen->w * (ypos / scale) * BPP + (xpos / scale) * BPP);
-                Uint32 *destpix = (Uint32 *) (((uint8_t *) surface->pixels) + surface->w * ypos * BPP + xpos * BPP);
-                *destpix = *srcpix;
+        if (SDL_MUSTLOCK(surface)) {
+            if (SDL_LockSurface(surface) < 0) {
+                fprintf(stderr, "SDL_LockSurface failed: %s\n", SDL_GetError());
+                goto free_msg_and_exit;
             }
+        }
+        retained = do_update(ctx, message, display_list, &verified);
+        if (SDL_MUSTLOCK(surface)) {
+            SDL_UnlockSurface(surface);
         }
 
     } else if (cmd == globalcontext_make_atom(ctx->global, "\xF"
@@ -466,24 +564,37 @@ static void process_message(Context *ctx)
         }
         free(handle);
 
+    } else if (cmd == globalcontext_make_atom(ctx->global, "\xF" "deregister_font")) {
+        if (term_get_tuple_arity(req) != 2 || !term_is_atom(term_get_tuple_element(req, 1))) {
+            goto invalid_message;
+        }
+        char *handle = interop_atom_to_string(ctx, term_get_tuple_element(req, 1));
+        if (handle != NULL) {
+            ufont_manager_unregister(ufont_manager, handle);
+        }
+        free(handle);
+
     } else {
         fprintf(stderr, "unexpected command: ");
         term_display(stderr, req, ctx);
         fprintf(stderr, "\n");
     }
 
-    if (SDL_MUSTLOCK(surface)) {
-        SDL_UnlockSurface(surface);
-    }
-
     SDL_Flip(surface);
 
-    if (UNLIKELY(memory_ensure_free(ctx, TUPLE_SIZE(3)) != MEMORY_GC_OK)) {
+    if (UNLIKELY(memory_ensure_free(ctx, TUPLE_SIZE(2) + TUPLE_SIZE(2)) != MEMORY_GC_OK)) {
         abort();
+    }
+    term reply = OK_ATOM;
+    if (!verified) {
+        term reason = globalcontext_make_atom(ctx->global, "\xD" "verify_failed");
+        reply = term_alloc_tuple(2, &ctx->heap);
+        term_put_tuple_element(reply, 0, ERROR_ATOM);
+        term_put_tuple_element(reply, 1, reason);
     }
     term return_tuple = term_alloc_tuple(2, &ctx->heap);
     term_put_tuple_element(return_tuple, 0, gen_message.ref);
-    term_put_tuple_element(return_tuple, 1, OK_ATOM);
+    term_put_tuple_element(return_tuple, 1, reply);
 
     int local_process_id = term_to_local_process_id(gen_message.pid);
     globalcontext_send_message(ctx->global, local_process_id, return_tuple);
@@ -497,7 +608,9 @@ invalid_message:
     fprintf(stderr, "Expected gen_server call.\n");
 
 free_msg_and_exit:
-    destroy_message(message, ctx->global);
+    if (!retained) {
+        destroy_message(message, ctx->global);
+    }
     return;
 }
 
@@ -760,6 +873,14 @@ void *display_loop(void *args)
 
     memset(screen->pixels, 0x80, disp_opts->width * disp_opts->height * BPP);
     memset(surface->pixels, 0x80, disp_opts->width * scale * disp_opts->height * scale * BPP);
+
+    display_frame_init(&frame, screen->w, screen->h);
+
+    const char *verify_env = getenv("AVM_SDL_DISPLAY_VERIFY_DAMAGE");
+    verify_damage = (verify_env != NULL) && (verify_env[0] != '\0') && strcmp(verify_env, "0");
+    if (verify_damage) {
+        fprintf(stderr, "damage verify: enabled, every update is checked against a full render\n");
+    }
 
     ufont_manager = ufont_manager_new();
 

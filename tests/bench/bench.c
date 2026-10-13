@@ -65,7 +65,7 @@ static void render_frame(BaseDisplayItem items[], size_t len)
         BaseDisplayItem *row = display_items_row(items, len, ypos);
         int xpos = 0;
         while (xpos < screen.w) {
-            xpos += dcs_lcd_draw_x(&screen, xpos, ypos, row);
+            xpos += dcs_lcd_draw_x(&screen, xpos, ypos, screen.w, row);
         }
         for (int i = 0; i < screen.w; i++) {
             g_checksum += line_buf[i];

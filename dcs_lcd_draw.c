@@ -47,6 +47,10 @@ int dcs_lcd_draw_image_x(const struct DCSLCDScreen *screen,
 
     int width = item->width;
     const char *data = item->data.image_data.pix;
+    if (data == NULL) {
+        // A ufont text nobody rasterized, see display_items_rasterize()
+        return -max_line_len;
+    }
 
     int drawn_pixels = 0;
 
@@ -247,9 +251,9 @@ int dcs_lcd_draw_scaled_cropped_img_x(const struct DCSLCDScreen *screen,
 }
 
 int dcs_lcd_draw_x(const struct DCSLCDScreen *screen,
-    int xpos, int ypos, BaseDisplayItem *row)
+    int xpos, int ypos, int x_end, BaseDisplayItem *row)
 {
-    int line_len = screen->w - xpos;
+    int line_len = x_end - xpos;
     int transparent_run = INT_MAX;
 
     for (BaseDisplayItem *item = row; item != NULL; item = item->next) {
@@ -270,6 +274,7 @@ int dcs_lcd_draw_x(const struct DCSLCDScreen *screen,
         int drawn_pixels = 0;
         switch (item->primitive) {
             case PrimitiveImage:
+            case PrimitiveTextImage:
                 drawn_pixels = dcs_lcd_draw_image_x(screen, xpos, ypos, max_line_len, item);
                 break;
 

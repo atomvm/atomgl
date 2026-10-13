@@ -196,6 +196,9 @@ void ufont_manager_register(UFontManager *ufont_manager, const char *handle, Epd
         void *owned_data);
 EpdFont *ufont_manager_find_by_handle(UFontManager *ufont_manager, const char *handle);
 bool ufont_manager_unregister(UFontManager *ufont_manager, const char *handle);
+// Changes with every registration and unregistration: text rasterized at another
+// generation may come from a different font registered under the same handle.
+uint32_t ufont_manager_generation(const UFontManager *ufont_manager);
 
 EpdFont *ufont_parse(const void *iff_binary, int buf_size);
 

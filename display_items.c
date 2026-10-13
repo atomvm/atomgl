@@ -28,6 +28,7 @@
 #include <interop.h>
 #include <utils.h>
 
+#include "display_damage.h"
 #include "font_data.h"
 
 #ifdef ENABLE_UFONT
@@ -496,38 +497,26 @@ static const char *init_text_item(BaseDisplayItem *item, term req, Context *ctx)
             return NULL;
         }
 
-        struct Surface surface;
-        surface.width = rect.width;
-        surface.height = rect.height;
-        surface.buffer = malloc(rect.width * rect.height * BPP);
-        if (IS_NULL_PTR(surface.buffer)) {
+        size_t text_size = strlen(text) + 1;
+        struct TextImageSource *source = malloc(sizeof(*source) + text_size);
+        if (IS_NULL_PTR(source)) {
             free(text);
             return "out of memory";
         }
-        memset(surface.buffer, 0, rect.width * rect.height * BPP);
-        // Convert Erlang fgcolor (0xRRGGBBAA) to RGBA8888 little-
-        // endian byte order (R in low byte, alpha byte cleared) so
-        // epd_draw_pixel can OR it with the per-pixel alpha.
-        surface.fg_color = ((fgcolor >> 24) & 0xFFu)
-            | (((fgcolor >> 16) & 0xFFu) << 8)
-            | (((fgcolor >> 8) & 0xFFu) << 16);
-        int text_x = 0;
-        int text_y = loaded_font->ascender;
-        enum EpdDrawError res = epd_write_default(loaded_font, text, &text_x, &text_y, &surface);
+        source->font = font;
+        source->font_generation = ufont_manager_generation(ufont_manager);
+        source->fgcolor = fgcolor;
+        memcpy(source->text, text, text_size);
         free(text);
-        if (UNLIKELY(res != EPD_DRAW_SUCCESS)) {
-            free(surface.buffer);
-            return "text drawing failed";
-        }
 
-        item->primitive = PrimitiveImage;
+        item->primitive = PrimitiveTextImage;
         item->x = clamp_coord(x);
         item->y = clamp_coord(y);
-        item->width = surface.width;
-        item->height = surface.height;
+        item->width = rect.width;
+        item->height = rect.height;
         item->brcolor = brcolor;
-        item->data.image_data.pix = surface.buffer;
-        item->owns_data = true;
+        item->data.text_image_data.image.pix = NULL;
+        item->data.text_image_data.source = source;
 #else
         fprintf(stderr, "unsupported font: ");
         term_display(stderr, font, ctx);
@@ -667,10 +656,9 @@ void display_items_delete(BaseDisplayItem items[], size_t items_len)
         BaseDisplayItem *item = &items[i];
 
         switch (item->primitive) {
-            case PrimitiveImage:
-                if (item->owns_data) {
-                    free((void *) item->data.image_data.pix);
-                }
+            case PrimitiveTextImage:
+                free((void *) item->data.text_image_data.image.pix);
+                free((void *) item->data.text_image_data.source);
                 break;
 
             case PrimitiveRect:
@@ -691,4 +679,90 @@ void display_items_delete(BaseDisplayItem items[], size_t items_len)
     }
 
     free(items);
+}
+
+#ifdef ENABLE_UFONT
+static const char *rasterize_text_image(BaseDisplayItem *item, Context *ctx)
+{
+    struct TextImageData *data = &item->data.text_image_data;
+    const struct TextImageSource *source = data->source;
+
+    // Fonts are registered and unregistered between updates only, so this is
+    // the font the item was measured with.
+    char *handle = interop_atom_to_string(ctx, source->font);
+    EpdFont *loaded_font = NULL;
+    if (!IS_NULL_PTR(handle)) {
+        loaded_font = ufont_manager_find_by_handle(ufont_manager, handle);
+        free(handle);
+    }
+    if (UNLIKELY(IS_NULL_PTR(loaded_font))) {
+        return "unsupported font";
+    }
+
+    struct Surface surface;
+    surface.width = item->width;
+    surface.height = item->height;
+    surface.buffer = malloc(item->width * item->height * BPP);
+    if (IS_NULL_PTR(surface.buffer)) {
+        return "out of memory";
+    }
+    memset(surface.buffer, 0, item->width * item->height * BPP);
+    // Convert Erlang fgcolor (0xRRGGBBAA) to RGBA8888 little-
+    // endian byte order (R in low byte, alpha byte cleared) so
+    // epd_draw_pixel can OR it with the per-pixel alpha.
+    surface.fg_color = ((source->fgcolor >> 24) & 0xFFu)
+        | (((source->fgcolor >> 16) & 0xFFu) << 8)
+        | (((source->fgcolor >> 8) & 0xFFu) << 16);
+    int text_x = 0;
+    int text_y = loaded_font->ascender;
+    enum EpdDrawError res = epd_write_default(loaded_font, source->text, &text_x, &text_y, &surface);
+    if (UNLIKELY(res != EPD_DRAW_SUCCESS)) {
+        free(surface.buffer);
+        return "text drawing failed";
+    }
+
+    data->image.pix = surface.buffer;
+
+    return NULL;
+}
+#endif
+
+void display_items_rasterize(BaseDisplayItem items[], size_t items_len,
+    const struct DisplayDamage *area, Context *ctx)
+{
+#ifdef ENABLE_UFONT
+    for (size_t i = 0; i < items_len; i++) {
+        BaseDisplayItem *item = &items[i];
+        if (item->primitive != PrimitiveTextImage || item->data.text_image_data.image.pix != NULL) {
+            continue;
+        }
+        if (area != NULL
+            && !display_damage_intersects_rect(area, item->x, item->y, item->width, item->height)) {
+            continue;
+        }
+        const char *reason = rasterize_text_image(item, ctx);
+        if (UNLIKELY(reason != NULL)) {
+            fprintf(stderr, "display list item %u: text not rasterized: %s\n", (unsigned) (i + 1),
+                reason);
+            free((void *) item->data.text_image_data.source);
+            memset(item, 0, sizeof(*item));
+        }
+    }
+#else
+    UNUSED(items);
+    UNUSED(items_len);
+    UNUSED(area);
+    UNUSED(ctx);
+#endif
+}
+
+void display_items_release_pixels(BaseDisplayItem items[], size_t items_len)
+{
+    for (size_t i = 0; i < items_len; i++) {
+        BaseDisplayItem *item = &items[i];
+        if (item->primitive == PrimitiveTextImage) {
+            free((void *) item->data.text_image_data.image.pix);
+            item->data.text_image_data.image.pix = NULL;
+        }
+    }
 }

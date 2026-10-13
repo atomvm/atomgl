@@ -72,6 +72,10 @@ int epaper_draw_image_x(const struct EpaperScreen *screen,
 
     int width = item->width;
     const char *data = item->data.image_data.pix;
+    if (data == NULL) {
+        // A ufont text nobody rasterized, see display_items_rasterize()
+        return -max_line_len;
+    }
 
     int drawn_pixels = 0;
 
@@ -337,6 +341,7 @@ int epaper_draw_x(const struct EpaperScreen *screen,
         int drawn_pixels = 0;
         switch (item->primitive) {
             case PrimitiveImage:
+            case PrimitiveTextImage:
                 drawn_pixels = epaper_draw_image_x(screen, line_buf, xpos, ypos, max_line_len, item);
                 break;
 

@@ -339,4 +339,20 @@ items = [
 
 **Note:** While direct port calls work, the recommended approach is to use [avm_scene](https://github.com/atomvm/avm_scene) which provides a higher-level interface for managing display updates and handling the display list lifecycle properly.
 
+### Partial Updates
+
+Every `update` is compared with the previous one and only the areas that changed are rendered and
+sent to the panel, so sending the same list again costs nothing. The first update after opening the
+display paints the whole screen, and so does the first one after 10 seconds without messages: the
+driver releases the list it keeps to give the memory back, which costs applications refreshing less
+often one full repaint per update. Pixels not covered by any item are black on the DCS LCDs, so
+include a background rectangle as the last item for any other background color. The `draw_buffer`
+command paints outside of the display list; the area it touches is repainted by the next `update`.
+
+Image pixels are never compared: an image counts as changed whenever it comes from a different
+binary, so keep and reuse the same binary across updates. Binaries below the heap binary threshold
+(less than 32 bytes on the ESP32) repaint on every update.
+
+E-paper panels do not support partial refresh and always redraw the whole panel.
+
 For more information about display primitives and the display list concept, see the [primitives documentation](primitives.md).

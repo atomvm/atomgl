@@ -21,16 +21,28 @@
 #ifndef _DISPLAY_TASK_H_
 #define _DISPLAY_TASK_H_
 
+#include <stdbool.h>
+
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 
 #include <context.h>
 #include <mailbox.h>
 
+#include "display_frame.h"
+
+// Without messages for this long the retained display list is released to
+// give its memory back; the next update repaints the whole screen.
+#define DISPLAY_IDLE_TIMEOUT_MS 10000
+
 struct DisplayTaskArgs
 {
     QueueHandle_t messages_queue;
-    void (*process_message_fn)(Message *message, Context *ctx);
+    // Handles one message. Returns true when the driver keeps the message
+    // (and disposes it itself later), false when the task must dispose it.
+    bool (*process_message_fn)(Message *message, Context *ctx);
+    // NULL when the driver keeps no display list between updates.
+    struct DisplayFrame *frame;
     Context *ctx;
 };
 

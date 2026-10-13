@@ -54,6 +54,8 @@
 #include "dcs_lcd_draw.h"
 #include "dcs_lcd_screen.h"
 #include "display_common.h"
+#include "display_damage.h"
+#include "display_frame.h"
 #include "display_items.h"
 #include "display_message.h"
 #include "display_task.h"
@@ -87,6 +89,7 @@ struct DCSLCDDriver
     const struct DCSLCDDesc *desc;
 
     struct DCSLCDScreen screen;
+    struct DisplayFrame frame;
 
     Context *ctx;
 
@@ -141,82 +144,78 @@ static inline void rgb565_swapped_line_to_rgb888(uint8_t *dst, const uint16_t *s
 static void display_init(Context *ctx, term opts);
 static void display_init_using_list(struct DCSLCDDriver *driver, term init_list);
 
-static void do_update(Context *ctx, term display_list)
+#ifdef ATOMGL_PROFILE
+struct DrawStats
 {
-#ifdef ATOMGL_PROFILE
-    int64_t frame_start = esp_timer_get_time();
+    int64_t draw_us;
+    int64_t max_line_us;
+    int64_t spi_wait_us;
+    int pixels;
+};
+
+static struct DrawStats draw_stats;
 #endif
 
-    BaseDisplayItem *items;
-    size_t len;
-    if (UNLIKELY(display_items_new_list(display_list, &items, &len, ctx) != DisplayItemsOk)) {
-        return;
-    }
-#ifdef ATOMGL_PROFILE
-    int64_t parse_us = esp_timer_get_time() - frame_start;
-#endif
+static void draw_rect(struct DCSLCDDriver *driver, const struct DisplayRect *rect,
+    BaseDisplayItem items[], size_t items_len)
+{
+    struct DCSLCDScreen *screen = &driver->screen;
+    int x_end = rect->x + rect->width;
+    int y_end = rect->y + rect->height;
 
-    struct DCSLCDDriver *driver = DCS_LCD_DRIVER_FROM_CTX(ctx);
-    int screen_width = driver->screen.w;
-    int screen_height = driver->screen.h;
-
-    dcs_lcd_set_paint_area(&driver->bus, &driver->screen, 0, 0, screen_width, screen_height);
+    // The bus lock is not reentrant and the DC line must not toggle while a
+    // transfer is in flight, hence the order of the calls below.
+    dcs_lcd_set_paint_area(&driver->bus, screen, rect->x, rect->y, rect->width, rect->height);
     spi_dc_write_command(&driver->bus, DCS_LCD_RAMWR);
     spi_device_acquire_bus(driver->bus.spi_disp.handle, portMAX_DELAY);
 
     bool transaction_in_progress = false;
 
-#ifdef ATOMGL_PROFILE
-    int64_t draw_us = 0;
-    int64_t max_line_us = 0;
-    int64_t spi_wait_us = 0;
-#endif
-
-    for (int ypos = 0; ypos < screen_height; ypos++) {
+    for (int ypos = rect->y; ypos < y_end; ypos++) {
 #ifdef ATOMGL_PROFILE
         int64_t line_start = esp_timer_get_time();
 #endif
-        BaseDisplayItem *row = display_items_row(items, len, ypos);
-        int xpos = 0;
-        while (xpos < screen_width) {
-            int drawn_pixels = dcs_lcd_draw_x(&driver->screen, xpos, ypos, row);
-            xpos += drawn_pixels;
+        // Pixels no item covers are black.
+        memset(screen->pixels + rect->x, 0, rect->width * sizeof(uint16_t));
+        BaseDisplayItem *row = display_items_row(items, items_len, ypos);
+        int xpos = rect->x;
+        while (xpos < x_end) {
+            xpos += dcs_lcd_draw_x(screen, xpos, ypos, x_end, row);
         }
 #ifdef ATOMGL_PROFILE
         int64_t line_us = esp_timer_get_time() - line_start;
-        draw_us += line_us;
-        if (line_us > max_line_us) {
-            max_line_us = line_us;
+        draw_stats.draw_us += line_us;
+        if (line_us > draw_stats.max_line_us) {
+            draw_stats.max_line_us = line_us;
         }
 #endif
 
         if (transaction_in_progress) {
             spi_transaction_t *trans;
-            // I did a quick measurement, and most of the time is spent waiting for DMA transaction
-            // eg. 23 us spent in draw_x, 188 us spent in spi_device_get_trans_result
 #ifdef ATOMGL_PROFILE
             int64_t wait_start = esp_timer_get_time();
 #endif
             spi_device_get_trans_result(driver->bus.spi_disp.handle, &trans, portMAX_DELAY);
 #ifdef ATOMGL_PROFILE
-            spi_wait_us += esp_timer_get_time() - wait_start;
+            draw_stats.spi_wait_us += esp_timer_get_time() - wait_start;
 #endif
         }
 
         // Swap scanline buffers.
-        void *tmp = driver->screen.pixels;
-        driver->screen.pixels = driver->screen.pixels_out;
-        driver->screen.pixels_out = tmp;
+        uint16_t *tmp = screen->pixels;
+        screen->pixels = screen->pixels_out;
+        screen->pixels_out = tmp;
 
         if (driver->desc->pixel_bytes == 2) {
-            spi_display_dma_write(&driver->bus.spi_disp, screen_width * sizeof(uint16_t), driver->screen.pixels_out);
+            spi_display_dma_write(&driver->bus.spi_disp, rect->width * sizeof(uint16_t),
+                screen->pixels_out + rect->x);
         } else {
-            void *tmpb = driver->screen.bytes;
-            driver->screen.bytes = driver->screen.bytes_out;
-            driver->screen.bytes_out = tmpb;
+            uint8_t *tmpb = screen->bytes;
+            screen->bytes = screen->bytes_out;
+            screen->bytes_out = tmpb;
 
-            rgb565_swapped_line_to_rgb888(driver->screen.bytes_out, driver->screen.pixels_out, screen_width);
-            spi_display_dma_write(&driver->bus.spi_disp, screen_width * 3, driver->screen.bytes_out);
+            rgb565_swapped_line_to_rgb888(screen->bytes_out, screen->pixels_out + rect->x, rect->width);
+            spi_display_dma_write(&driver->bus.spi_disp, rect->width * 3, screen->bytes_out);
         }
 
         transaction_in_progress = true;
@@ -229,23 +228,54 @@ static void do_update(Context *ctx, term display_list)
 #endif
         spi_device_get_trans_result(driver->bus.spi_disp.handle, &trans, portMAX_DELAY);
 #ifdef ATOMGL_PROFILE
-        spi_wait_us += esp_timer_get_time() - wait_start;
+        draw_stats.spi_wait_us += esp_timer_get_time() - wait_start;
 #endif
     }
 
     spi_device_release_bus(driver->bus.spi_disp.handle);
-
-    display_items_delete(items, len);
-
 #ifdef ATOMGL_PROFILE
-    fprintf(stderr,
-        "atomgl: %zu items, parse %lld us, draw %lld us, max line %lld us, spi wait %lld us, frame %lld us\n",
-        len, (long long) parse_us, (long long) draw_us, (long long) max_line_us,
-        (long long) spi_wait_us, (long long) (esp_timer_get_time() - frame_start));
+    draw_stats.pixels += rect->width * rect->height;
 #endif
 }
 
-static void process_message(Message *message, Context *ctx)
+// Returns true when `message` has been retained as the frame's message.
+static bool do_update(struct DCSLCDDriver *driver, Message *message, term display_list, Context *ctx)
+{
+#ifdef ATOMGL_PROFILE
+    int64_t frame_start = esp_timer_get_time();
+    memset(&draw_stats, 0, sizeof(draw_stats));
+#endif
+
+    struct DisplayUpdate update;
+    if (!display_frame_begin_update(&driver->frame, display_list, ctx, &update)) {
+        return false;
+    }
+#ifdef ATOMGL_PROFILE
+    int64_t parse_us = esp_timer_get_time() - frame_start;
+    size_t items_len = update.items_len;
+    size_t rects_len = update.damage.rects_len;
+#endif
+
+    display_items_rasterize(update.items, update.items_len, &update.damage, ctx);
+
+    for (size_t i = 0; i < update.damage.rects_len; i++) {
+        draw_rect(driver, &update.damage.rects[i], update.items, update.items_len);
+    }
+
+    display_frame_commit(&driver->frame, &update, message, ctx->global);
+
+#ifdef ATOMGL_PROFILE
+    fprintf(stderr,
+        "atomgl: %zu items, %zu rects, %d pixels, parse+diff %lld us, draw %lld us, max line %lld us, spi wait %lld us, frame %lld us\n",
+        items_len, rects_len, draw_stats.pixels, (long long) parse_us, (long long) draw_stats.draw_us,
+        (long long) draw_stats.max_line_us, (long long) draw_stats.spi_wait_us,
+        (long long) (esp_timer_get_time() - frame_start));
+#endif
+
+    return true;
+}
+
+static bool process_message(Message *message, Context *ctx)
 {
     GenMessage gen_message;
     if (UNLIKELY(port_parse_gen_message(message->message, &gen_message) != GenCallMessage)) {
@@ -263,12 +293,19 @@ static void process_message(Message *message, Context *ctx)
 
     if (cmd == context_make_atom(ctx, "\x6"
                                       "update")) {
+        if (term_get_tuple_arity(req) != 2) {
+            fprintf(stderr, "display: invalid update request\n");
+            return false;
+        }
         term display_list = term_get_tuple_element(req, 1);
-        do_update(ctx, display_list);
-        return;
+        return do_update(driver, message, display_list, ctx);
 
     } else if (cmd == context_make_atom(ctx, "\xB"
                                              "draw_buffer")) {
+        if (term_get_tuple_arity(req) != 7) {
+            fprintf(stderr, "display: invalid draw_buffer request\n");
+            return false;
+        }
         int x = term_to_int(term_get_tuple_element(req, 1));
         int y = term_to_int(term_get_tuple_element(req, 2));
         int width = term_to_int(term_get_tuple_element(req, 3));
@@ -279,14 +316,16 @@ static void process_message(Message *message, Context *ctx)
         const void *data = (const void *) ((addr_low | (addr_high << 16)));
 
         dcs_lcd_draw_buffer(&driver->bus, &driver->screen, driver->desc->pixel_bytes, x, y, width, height, data);
+        // The buffer bypasses the display list.
+        display_frame_invalidate_rect(&driver->frame, x, y, width, height);
 
         // Reply already sent at enqueue time by
         // try_pre_ack_render_cmd in display_task.c.
-        return;
+        return false;
 
     } else if (cmd == globalcontext_make_atom(ctx->global, "\xA" "load_image")) {
         handle_load_image(req, gen_message.ref, gen_message.pid, ctx);
-        return;
+        return false;
 
     } else {
         fprintf(stderr, "display: ");
@@ -301,6 +340,8 @@ static void process_message(Message *message, Context *ctx)
 
     display_message_send(gen_message.pid, return_tuple, ctx->global);
     END_WITH_STACK_HEAP(heap, ctx->global);
+
+    return false;
 }
 
 static void set_rotation(struct DCSLCDDriver *driver, int rotation)
@@ -365,9 +406,11 @@ static void display_init(Context *ctx, term opts)
         driver->screen.bytes = heap_caps_malloc(driver->screen.w * 3, MALLOC_CAP_DMA);
         driver->screen.bytes_out = heap_caps_malloc(driver->screen.w * 3, MALLOC_CAP_DMA);
     }
+    display_frame_init(&driver->frame, driver->screen.w, driver->screen.h);
 
     driver->display_args.messages_queue = xQueueCreate(32, sizeof(Message *));
     driver->display_args.process_message_fn = process_message;
+    driver->display_args.frame = &driver->frame;
     driver->display_args.ctx = ctx;
     ctx->platform_data = &driver->display_args;
 

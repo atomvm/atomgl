@@ -257,7 +257,7 @@ static void render(term display_list, uint16_t *frame)
         memset(line, 0, sizeof(line));
         int xpos = 0;
         while (xpos < SCREEN_W) {
-            int drawn_pixels = dcs_lcd_draw_x(&screen, xpos, ypos, row);
+            int drawn_pixels = dcs_lcd_draw_x(&screen, xpos, ypos, SCREEN_W, row);
             if (drawn_pixels <= 0) {
                 fprintf(stderr, "dcs_lcd_draw_x returned %d at (%d, %d)\n", drawn_pixels, xpos, ypos);
                 abort();
@@ -1267,7 +1267,7 @@ static int renderer_draw_x(renderer_t renderer, int w, uint16_t *line, int xpos,
             screen.w = w;
             screen.h = SCREEN_H;
             screen.pixels = line;
-            return dcs_lcd_draw_x(&screen, xpos, ypos, row);
+            return dcs_lcd_draw_x(&screen, xpos, ypos, w, row);
         }
     }
 }
