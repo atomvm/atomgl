@@ -128,6 +128,10 @@ static int draw_image_x(int xpos, int ypos, int max_line_len, BaseDisplayItem *i
 
     int width = item->width;
     const char *data = item->data.image_data.pix;
+    if (data == NULL) {
+        // A ufont text nobody rasterized, see display_items_rasterize()
+        return -max_line_len;
+    }
 
     int drawn_pixels = 0;
 
@@ -417,7 +421,7 @@ static void blit_rect(const struct DisplayRect *rect)
     }
 }
 
-static bool verify_update(const struct DisplayUpdate *update)
+static bool verify_update(const struct DisplayUpdate *update, Context *ctx)
 {
     size_t size = screen->w * screen->h * BPP;
     if (verify_pixels == NULL) {
@@ -429,6 +433,7 @@ static bool verify_update(const struct DisplayUpdate *update)
         }
     }
 
+    display_items_rasterize(update->items, update->items_len, NULL, ctx);
     void *saved = screen->pixels;
     screen->pixels = verify_pixels;
     struct DisplayRect full = { .x = 0, .y = 0, .width = screen->w, .height = screen->h };
@@ -470,13 +475,15 @@ static bool do_update(Context *ctx, Message *message, term display_list, bool *v
         return false;
     }
 
+    display_items_rasterize(update.items, update.items_len, &update.damage, ctx);
+
     for (size_t i = 0; i < update.damage.rects_len; i++) {
         render_rect(&update.damage.rects[i], update.items, update.items_len);
         blit_rect(&update.damage.rects[i]);
     }
 
     if (verify_damage) {
-        *verified = verify_update(&update);
+        *verified = verify_update(&update, ctx);
     }
 
     display_frame_commit(&frame, &update, message, ctx->global);

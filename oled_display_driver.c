@@ -110,6 +110,19 @@ static bool do_update(struct OLEDDriver *driver, Message *message, term display_
         return true;
     }
 
+    // Touched pages are drawn whole
+    struct DisplayDamage drawn;
+    display_damage_init(&drawn, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    for (int page = 0; page < PAGES_NUM; page++) {
+        int x_start;
+        int x_end;
+        if (display_damage_rows_span(&update.damage, page * PAGE_HEIGHT, (page + 1) * PAGE_HEIGHT,
+                &x_start, &x_end)) {
+            display_damage_add_rect(&drawn, 0, page * PAGE_HEIGHT, DISPLAY_WIDTH, PAGE_HEIGHT);
+        }
+    }
+    display_items_rasterize(update.items, update.items_len, &drawn, ctx);
+
     int screen_width = DISPLAY_WIDTH;
 
     int memsize = (DISPLAY_WIDTH * (PAGE_HEIGHT + 1)) / sizeof(uint8_t);

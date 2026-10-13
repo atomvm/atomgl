@@ -109,6 +109,15 @@ static bool do_update(struct MemoryLCDDriver *driver, Message *message, term dis
     int memsize = 2 + 400 / 8 + 2;
     uint8_t *buf = driver->pixels;
 
+    // Dirty lines are drawn whole
+    struct DisplayDamage drawn;
+    display_damage_init(&drawn, screen_width, screen_height);
+    for (size_t i = 0; i < update.damage.rects_len; i++) {
+        const struct DisplayRect *rect = &update.damage.rects[i];
+        display_damage_add_rect(&drawn, 0, rect->y, screen_width, rect->height);
+    }
+    display_items_rasterize(update.items, update.items_len, &drawn, ctx);
+
     spi_device_acquire_bus(driver->spi_disp.handle, portMAX_DELAY);
     bool transaction_in_progress = false;
 

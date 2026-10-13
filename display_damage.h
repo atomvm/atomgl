@@ -67,4 +67,8 @@ bool display_damage_is_full(const struct DisplayDamage *damage);
 bool display_damage_rows_span(const struct DisplayDamage *damage, int y_start, int y_end,
     int *x_start, int *x_end);
 
+// Reports whether any rectangle overlaps the given one.
+bool display_damage_intersects_rect(const struct DisplayDamage *damage, int x, int y, int width,
+    int height);
+
 #endif

@@ -59,8 +59,8 @@ struct ImageData
     const char *pix;
 };
 
-// What the pixels of a text rasterized with a ufont are a function of, since
-// pix is a fresh buffer on every update.
+// What the pixels of a text rasterized with a ufont are a function of: its
+// buffer exists only while the text is drawn, so items compare by this.
 struct TextImageSource
 {
     term font;
@@ -70,7 +70,9 @@ struct TextImageSource
 };
 
 // Text rasterized with a ufont: drawn as an image, compared by its source.
-// image stays first, the renderers read it through image_data. Owns both.
+// image stays first, the renderers read it through image_data. pix is NULL
+// until display_items_rasterize() and after display_items_release_pixels().
+// Owns both.
 struct TextImageData
 {
     struct ImageData image;
@@ -269,5 +271,19 @@ void display_items_init_item(BaseDisplayItem *item, term req, Context *ctx);
 
 display_items_result_t display_items_new_list(term display_list, BaseDisplayItem **items, size_t *items_len, Context *ctx);
 void display_items_delete(BaseDisplayItem items[], size_t items_len);
+
+struct DisplayDamage;
+
+// Gives the ufont text items that intersect a rectangle of `area` (every one when `area` is
+// NULL) their pixels. Drivers call it with what they are about to draw before drawing the
+// first row: rasterizing (zlib) between two rows would stall the transfer. A text that cannot
+// be rasterized becomes an invalid item: it is inside `area`, which gets repainted without it,
+// and the next update sees it as changed.
+void display_items_rasterize(BaseDisplayItem items[], size_t items_len,
+    const struct DisplayDamage *area, Context *ctx);
+
+// Frees the pixels of the ufont text items, keeping their source: a retained item is only
+// compared, never drawn.
+void display_items_release_pixels(BaseDisplayItem items[], size_t items_len);
 
 #endif

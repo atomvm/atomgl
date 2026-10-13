@@ -103,6 +103,10 @@ int mono_draw_image_x(const struct MonoScreen *screen,
 
     int width = item->width;
     const char *data = item->data.image_data.pix;
+    if (data == NULL) {
+        // A ufont text nobody rasterized, see display_items_rasterize()
+        return -max_line_len;
+    }
 
     int drawn_pixels = 0;
 

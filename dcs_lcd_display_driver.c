@@ -256,6 +256,8 @@ static bool do_update(struct DCSLCDDriver *driver, Message *message, term displa
     size_t rects_len = update.damage.rects_len;
 #endif
 
+    display_items_rasterize(update.items, update.items_len, &update.damage, ctx);
+
     for (size_t i = 0; i < update.damage.rects_len; i++) {
         draw_rect(driver, &update.damage.rects[i], update.items, update.items_len);
     }

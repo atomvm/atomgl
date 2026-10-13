@@ -62,7 +62,8 @@ bool display_frame_begin_update(struct DisplayFrame *frame, term display_list, C
 
 // `message`, which owns the binaries of the update's items, is retained until
 // the next commit and must not be disposed by the caller. The previous items
-// and message are released.
+// and message are released, and so are the pixels of the update's ufont text:
+// a retained item is compared, never drawn.
 void display_frame_commit(struct DisplayFrame *frame, struct DisplayUpdate *update,
     Message *message, GlobalContext *global);
 

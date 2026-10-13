@@ -206,3 +206,23 @@ bool display_damage_rows_span(const struct DisplayDamage *damage, int y_start, i
 
     return found;
 }
+
+bool display_damage_intersects_rect(const struct DisplayDamage *damage, int x, int y, int width,
+    int height)
+{
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+    long long x_end = (long long) x + width;
+    long long y_end = (long long) y + height;
+
+    for (size_t i = 0; i < damage->rects_len; i++) {
+        const struct DisplayRect *rect = &damage->rects[i];
+        if (x < rect->x + rect->width && x_end > rect->x && y < rect->y + rect->height
+            && y_end > rect->y) {
+            return true;
+        }
+    }
+
+    return false;
+}

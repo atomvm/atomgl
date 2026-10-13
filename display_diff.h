@@ -29,8 +29,8 @@
 
 // True when the two items draw exactly the same pixels. Images must share the
 // pixel buffer: their content is never compared, to keep updates quick. Text
-// rasterized with a ufont gets a new buffer on every update, so it compares by
-// its text, font and color instead.
+// rasterized with a ufont has no lasting buffer, so it compares by its text,
+// font and color instead.
 bool display_diff_items_equal(const BaseDisplayItem *a, const BaseDisplayItem *b);
 
 // Adds to `damage` every area whose content may differ between the display

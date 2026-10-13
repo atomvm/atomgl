@@ -83,6 +83,7 @@ void display_frame_commit(struct DisplayFrame *frame, struct DisplayUpdate *upda
 {
     delete_content(frame, global);
 
+    display_items_release_pixels(update->items, update->items_len);
     frame->items = update->items;
     frame->items_len = update->items_len;
     frame->message = message;

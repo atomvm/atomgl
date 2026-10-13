@@ -191,6 +191,7 @@ static void do_update(Context *ctx, term display_list)
     if (UNLIKELY(display_items_new_list(display_list, &items, &len, ctx) != DisplayItemsOk)) {
         return;
     }
+    display_items_rasterize(items, len, NULL, ctx);
 
     struct EpaperDriver *driver = EPAPER_DRIVER_FROM_CTX(ctx);
     int screen_width = driver->screen.w;

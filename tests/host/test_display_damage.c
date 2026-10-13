@@ -203,6 +203,28 @@ static void test_rows_span(void)
     CHECK(x_start == 0 && x_end == 32);
 }
 
+static void test_intersects_rect(void)
+{
+    struct DisplayDamage damage;
+    display_damage_init(&damage, 20, 10);
+    display_damage_add_rect(&damage, 0, 0, 5, 5);
+    display_damage_add_rect(&damage, 10, 5, 5, 5);
+
+    CHECK(display_damage_intersects_rect(&damage, 4, 4, 1, 1));
+    CHECK(display_damage_intersects_rect(&damage, -5, -5, 10, 10));
+    CHECK(display_damage_intersects_rect(&damage, 9, 4, 2, 2));
+    CHECK(display_damage_intersects_rect(&damage, 14, 9, 100, 100));
+    CHECK(!display_damage_intersects_rect(&damage, 5, 5, 1, 1));
+    CHECK(!display_damage_intersects_rect(&damage, 15, 0, 5, 5));
+    CHECK(!display_damage_intersects_rect(&damage, 0, 0, 0, 5));
+    CHECK(!display_damage_intersects_rect(&damage, 0, 0, 5, 0));
+    CHECK(!display_damage_intersects_rect(&damage, INT_MIN, INT_MIN, 10, 10));
+    CHECK(!display_damage_intersects_rect(&damage, 19, 9, INT_MAX, INT_MAX));
+
+    display_damage_clear(&damage);
+    CHECK(!display_damage_intersects_rect(&damage, 0, 0, 20, 10));
+}
+
 // Whatever is added must stay covered, whatever was not added should stay
 // uncovered unless merging had to grow a rectangle.
 static void test_random_coverage(void)
@@ -270,6 +292,7 @@ int main(void)
     test_merging();
     test_add_damage();
     test_rows_span();
+    test_intersects_rect();
     test_random_coverage();
 
     if (failures) {

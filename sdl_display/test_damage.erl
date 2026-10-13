@@ -21,7 +21,8 @@
 %% Pushes a sequence of display lists that exercises the partial repaint
 %% logic: items changing in place, appearing, disappearing, moving, changing
 %% z-order, identical frames, off screen and invalid items, many changes at
-%% once, text in a ufont that gets replaced. Run with the SDL driver in verify
+%% once, text in a ufont that stays while other items change or gets replaced.
+%% Run with the SDL driver in verify
 %% mode, headless if needed:
 %%
 %%   AVM_SDL_DISPLAY_VERIFY_DAMAGE=1 SDL_VIDEODRIVER=dummy \
@@ -177,6 +178,12 @@ scenes(Big, Tiny, Tiny2) ->
         [{text, 20, 60, tiny, 16#FFFF00, transparent, <<"BAAB">>}, bg()],
         [{text, 20, 60, tiny, 16#00FFFF, 16#400040, <<"BAAB">>}, bg()],
         [UText, bg()],
+        % the same text while something else changes: neither repainted nor rasterized
+        [UText, {rect, 100, 10, 20, 20, 16#FF0000}, bg()],
+        [UText, {rect, 100, 10, 20, 20, 16#00FF00}, bg()],
+        % the same text over a rect that changes: repainted, hence rasterized again
+        [UText, {rect, 10, 55, 60, 20, 16#202020}, bg()],
+        [UText, {rect, 10, 55, 60, 20, 16#404040}, bg()],
         % the same text after the font was replaced under the same handle, then removed
         {deregister_font, tiny},
         {register_font, tiny, FontB},
