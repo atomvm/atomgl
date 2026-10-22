@@ -37,6 +37,12 @@ Context *oled_display_create_port(GlobalContext *global, term opts);
 Context *display_create_port(GlobalContext *global, term opts)
 {
     term compat_atom = globalcontext_make_atom(global, ATOM_STR("\xA", "compatible"));
+    term descriptor_atom = globalcontext_make_atom(global, ATOM_STR("\xA", "descriptor"));
+
+    term descriptor_term = interop_proplist_get_value(opts, descriptor_atom);
+    if (descriptor_term != term_nil()) {
+        return epaper_display_create_port(global, opts);
+    }
 
     term compat_value_term = interop_proplist_get_value(opts, compat_atom);
     if (compat_value_term == term_nil()) {
@@ -51,10 +57,7 @@ Context *display_create_port(GlobalContext *global, term opts)
     }
 
     Context *ctx = NULL;
-    if (!strcmp(compat_string, "waveshare,5in65-acep-7c")
-        || !strcmp(compat_string, "good-display/gdep073e01")) {
-        ctx = epaper_display_create_port(global, opts);
-    } else if (!strcmp(compat_string, "sharp,memory-lcd")) {
+    if (!strcmp(compat_string, "sharp,memory-lcd")) {
         ctx = memory_lcd_display_create_port(global, opts);
     } else if (!strcmp(compat_string, "ilitek,ili9341")
         || !strcmp(compat_string, "ilitek,ili9342c")

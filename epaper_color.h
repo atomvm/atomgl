@@ -25,8 +25,12 @@
 
 extern const uint8_t epaper_acep_palette[7][3];
 extern const uint8_t epaper_gdep073e01_palette[7][3];
+extern const uint8_t epaper_ssd1680_4gray_palette[4][3];
 
 uint8_t epaper_dither_acep7(int x, int y, uint8_t r, uint8_t g, uint8_t b,
+    const uint8_t palette[][3], int palette_size);
+
+uint8_t epaper_dither_4gray(int x, int y, uint8_t r, uint8_t g, uint8_t b,
     const uint8_t palette[][3], int palette_size);
 
 #endif

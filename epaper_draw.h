@@ -51,4 +51,8 @@ int epaper_draw_x(const struct EpaperScreen *screen,
     uint8_t *line_buf, int xpos, int ypos,
     BaseDisplayItem *row);
 
+int epaper_draw_4gray_x(const struct EpaperScreen *screen,
+    uint8_t *line_buf, int xpos, int ypos,
+    BaseDisplayItem *row);
+
 #endif
