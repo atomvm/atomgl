@@ -213,7 +213,12 @@ static bool epaper_parse_panel_power(struct EpaperDriver *driver, term opts, Con
         ESP_LOGE(TAG, "Invalid panel_power option: expected a GPIO number.");
         return false;
     }
-    driver->panel_power_gpio = (int) term_to_int(gpio_term);
+    avm_int_t gpio = term_to_int(gpio_term);
+    if (gpio < 0 || gpio > INT_MAX || !GPIO_IS_VALID_OUTPUT_GPIO((int) gpio)) {
+        ESP_LOGE(TAG, "Invalid panel_power option: expected an output-capable GPIO.");
+        return false;
+    }
+    driver->panel_power_gpio = (int) gpio;
     driver->panel_power_active_high = true;
     driver->panel_power_delay_ms = EPAPER_PANEL_POWER_DEFAULT_DELAY_MS;
 
@@ -249,20 +254,25 @@ static bool epaper_parse_panel_power(struct EpaperDriver *driver, term opts, Con
 
 // Raises or drops the panel rail. Idempotent, so callers may assert power on
 // every path that is about to talk to the controller.
-static void epaper_set_panel_power(struct EpaperDriver *driver, bool on)
+static bool epaper_set_panel_power(struct EpaperDriver *driver, bool on)
 {
     if (driver->panel_power_gpio < 0 || on == driver->panel_power_on) {
-        return;
+        return true;
     }
 
     int on_level = driver->panel_power_active_high ? 1 : 0;
+    if (gpio_set_direction(driver->panel_power_gpio, GPIO_MODE_OUTPUT) != ESP_OK
+        || gpio_set_level(driver->panel_power_gpio, on ? on_level : !on_level) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to switch panel power GPIO%d %s.",
+            driver->panel_power_gpio, on ? "on" : "off");
+        return false;
+    }
     driver->panel_power_on = on;
-    gpio_set_direction(driver->panel_power_gpio, GPIO_MODE_OUTPUT);
-    gpio_set_level(driver->panel_power_gpio, on ? on_level : !on_level);
     if (on) {
         // The controller must be powered before it accepts reset and commands.
         epaper_delay_ms(driver->panel_power_delay_ms);
     }
+    return true;
 }
 
 static void wait_busy_level(struct EpaperDriver *driver, int level)
@@ -1014,9 +1024,15 @@ static bool epaper_wake_if_asleep(struct EpaperDriver *driver)
     const struct EPaperSleepMode *mode = driver->state.asleep_mode;
     // A sleep mode with lost controller RAM also drops the panel rail, so it
     // has to be raised (and allowed to settle) before the wake sequence runs.
-    epaper_set_panel_power(driver, true);
+    if (!epaper_set_panel_power(driver, true)) {
+        return false;
+    }
     if (!epaper_run_wake_sequence(driver, mode)) {
         ESP_LOGW(TAG, "E-paper wake sequence failed for %s.", driver->desc->name);
+        // Keep the port asleep and restore the rail-off state of lost-RAM modes.
+        if (mode != NULL && mode->controller_ram == EPAPER_CONTROLLER_RAM_LOST) {
+            epaper_set_panel_power(driver, false);
+        }
         return false;
     }
 
@@ -1045,6 +1061,11 @@ static bool do_sleep(Context *ctx, term mode_term)
     struct EpaperDriver *driver = EPAPER_DRIVER_FROM_CTX(ctx);
 
     if (driver->state.asleep) {
+        // Retry power-off if a previous sleep or failed wake could not drop it.
+        if (driver->state.asleep_mode != NULL
+            && driver->state.asleep_mode->controller_ram == EPAPER_CONTROLLER_RAM_LOST) {
+            return epaper_set_panel_power(driver, false);
+        }
         return true;
     }
 
@@ -1069,7 +1090,7 @@ static bool do_sleep(Context *ctx, term mode_term)
     if (mode->controller_ram == EPAPER_CONTROLLER_RAM_LOST) {
         // The descriptor says the controller keeps nothing across this mode, so
         // the panel rail can stay down until something wakes it again.
-        epaper_set_panel_power(driver, false);
+        return epaper_set_panel_power(driver, false);
     }
     return true;
 }
@@ -2750,7 +2771,10 @@ static bool display_spi_init(Context *ctx, term opts)
         epaper_free_init_failed_driver(driver, spi_device_added);
         return false;
     }
-    epaper_set_panel_power(driver, true);
+    if (!epaper_set_panel_power(driver, true)) {
+        epaper_free_init_failed_driver(driver, spi_device_added);
+        return false;
+    }
 
     driver->state.prev_valid = false;
     driver->state.fast_refresh_count = 0;
