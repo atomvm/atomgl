@@ -190,6 +190,37 @@ const uint8_t dcs_lcd_init_seq_ili9341[] = {
 _Static_assert(sizeof(dcs_lcd_init_seq_ili9341) == 113,
     "ili9341 init sequence size mismatch");
 
+// ILI9341V: retain ILI9341 power, gamma and orientation settings, but leave
+// VMCTR2 (0xC7) at its reset value to avoid flickering.
+const uint8_t dcs_lcd_init_seq_ili9341v[] = {
+    0x01,  DCS_LCD_INIT_SEQ_DELAY | 0,  5,                                             // SWRESET +5ms (0)
+    0xEF,  3,  0x03, 0x80, 0x02,                                                       // (3)
+    0xCF,  3,  0x00, 0xC1, 0x30,                                                       // Power ctrl B (3)
+    0xED,  4,  0x64, 0x03, 0x12, 0x81,                                                 // Power on seq (4)
+    0xE8,  3,  0x85, 0x00, 0x78,                                                       // Driver timing A (3)
+    0xCB,  5,  0x39, 0x2C, 0x00, 0x34, 0x02,                                           // Power ctrl A (5)
+    0xF7,  1,  0x20,                                                                    // Pump ratio (1)
+    0xEA,  2,  0x00, 0x00,                                                              // Driver timing B (2)
+    0xC0,  1,  0x23,                                                                    // PWCTR1 (1)
+    0xC1,  1,  0x10,                                                                    // PWCTR2 (1)
+    0xC5,  2,  0x3E, 0x28,                                                              // VMCTR1 (2)
+    0x36,  1,  0x08,                                                                    // MADCTL (1)
+    0x3A,  1,  0x55,                                                                    // COLMOD (1)
+    0xB1,  2,  0x00, 0x13,                                                              // FRMCTR1 (2)
+    0xB6,  3,  0x0A, 0xA2, 0x27,                                                       // DFUNCTR (3)
+    0xF2,  1,  0x00,                                                                    // Gamma fn dis (1)
+    0x26,  1,  0x01,                                                                    // GAMMASET (1)
+    0xE0, 15,  0x0F, 0x31, 0x2B, 0x0C, 0x0E, 0x08, 0x4E, 0xF1,                        // GMCTRP1 (15)
+               0x37, 0x07, 0x10, 0x03, 0x0E, 0x09, 0x00,
+    0xE1, 15,  0x00, 0x0E, 0x14, 0x03, 0x11, 0x07, 0x31, 0xC1,                        // GMCTRN1 (15)
+               0x48, 0x08, 0x0F, 0x0C, 0x31, 0x36, 0x0F,
+    0x11,  DCS_LCD_INIT_SEQ_DELAY | 0,  120,                                           // SLPOUT +120ms (0)
+    0x29,  DCS_LCD_INIT_SEQ_DELAY | 0,  120,                                           // DISPON +120ms (0)
+    DCS_LCD_INIT_SEQ_END
+};
+_Static_assert(sizeof(dcs_lcd_init_seq_ili9341v) == 110,
+    "ili9341v init sequence size mismatch");
+
 // ILI9342C — from display_init_9342c() in ili934x_display_driver.c
 // 12 command groups, 3 delays (SWRESET 5ms, SLPOUT 120ms, DISPON 120ms).
 // SLPOUT follows the vendor power commands; see ILI9341 seq for details.
@@ -348,6 +379,19 @@ const struct DCSLCDDesc dcs_lcd_desc_ili9341 = {
     .madctl            = { 0x08, 0xA8, 0xFF, 0xFF },
     .default_bgr       = true,
     .default_init_seq  = dcs_lcd_init_seq_ili9341,
+    .init_fn           = NULL,
+};
+
+const struct DCSLCDDesc dcs_lcd_desc_ili9341v = {
+    .name              = "ILI9341V",
+    .native_width      = 240,
+    .native_height     = 320,
+    .spi_clock_hz      = 27000000,
+    .pixel_bytes       = 2,
+    .colmod_value      = 0x55,
+    .madctl            = { 0x08, 0xA8, 0xFF, 0xFF },
+    .default_bgr       = true,
+    .default_init_seq  = dcs_lcd_init_seq_ili9341v,
     .init_fn           = NULL,
 };
 

@@ -98,6 +98,7 @@ static const struct {
     const struct DCSLCDDesc *desc;
 } dcs_lcd_compat_table[] = {
     { "ilitek,ili9341",   &dcs_lcd_desc_ili9341 },
+    { "ilitek,ili9341v",  &dcs_lcd_desc_ili9341v },
     { "ilitek,ili9342c",  &dcs_lcd_desc_ili9342c },
     { "ilitek,ili9486",   &dcs_lcd_desc_ili9486 },
     { "ilitek,ili9488",   &dcs_lcd_desc_ili9488 },

@@ -81,6 +81,7 @@ that would otherwise be impossible to support with traditional frame buffer appr
 ## Supported Hardware
 
 * `ilitek,ili9341` / `ilitek,ili9342c`: ILI9341 / ILI9342C - 240x320, 16-bit colors
+* `ilitek,ili9341v`: ILI9341V - 240x320, 16-bit colors; ILI9341 orientation and initialization with VMCTR2 (`0xC7`) left at its reset value.
 * `ilitek,ili9486`: ILI9486 - 320x480, 16-bit colors (RGB565)
 * `ilitek,ili9488`: ILI9488 - 320x480, 18-bit colors (RGB666 over SPI; 3 bytes/pixel transfer)
 * `waveshare,5in65-acep-7c`: Waveshare 7-color 5.65" ACeP display module - 600x480, 7 colors +
