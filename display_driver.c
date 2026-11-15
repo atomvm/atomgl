@@ -57,6 +57,7 @@ Context *display_create_port(GlobalContext *global, term opts)
     } else if (!strcmp(compat_string, "sharp,memory-lcd")) {
         ctx = memory_lcd_display_create_port(global, opts);
     } else if (!strcmp(compat_string, "ilitek,ili9341")
+        || !strcmp(compat_string, "ilitek,ili9341v")
         || !strcmp(compat_string, "ilitek,ili9342c")
         || !strcmp(compat_string, "ilitek,ili9486")
         || !strcmp(compat_string, "ilitek,ili9488")

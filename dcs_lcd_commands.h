@@ -74,6 +74,7 @@ void dcs_lcd_execute_init_seq(struct SPIDCBus *bus, const uint8_t *seq);
 
 // Built-in init sequences.
 extern const uint8_t dcs_lcd_init_seq_ili9341[];
+extern const uint8_t dcs_lcd_init_seq_ili9341v[];
 extern const uint8_t dcs_lcd_init_seq_ili9342c[];
 extern const uint8_t dcs_lcd_init_seq_ili9486[];
 extern const uint8_t dcs_lcd_init_seq_ili9488[];
@@ -105,6 +106,7 @@ struct DCSLCDDesc
 };
 
 extern const struct DCSLCDDesc dcs_lcd_desc_ili9341;
+extern const struct DCSLCDDesc dcs_lcd_desc_ili9341v;
 extern const struct DCSLCDDesc dcs_lcd_desc_ili9342c;
 extern const struct DCSLCDDesc dcs_lcd_desc_ili9486;
 extern const struct DCSLCDDesc dcs_lcd_desc_ili9488;
